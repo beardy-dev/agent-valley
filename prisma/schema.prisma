@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// A single agent's 50x50 farm, addressed by UUID for save/load.
+model Farm {
+  id        String   @id @default(uuid())
+  name      String?
+  width     Int      @default(50)
+  height    Int      @default(50)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tiles     Tile[]
+  agent     Agent?
+}
+
+// A registered agent. Authenticates to the (future) MCP tools using its id
+// plus the plaintext apiSecret handed back once at registration time —
+// only a salted hash of that secret is ever stored.
+model Agent {
+  id            String   @id @default(uuid())
+  name          String?
+  apiSecretHash String
+  farmId        String   @unique
+  farm          Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+}
+
+// One cell of a Farm's grid. Terrain and debris are separate layers on the
+// same coordinate; future layers (e.g. crops) can be added as columns here
+// without restructuring the grid.
+model Tile {
+  id        Int         @id @default(autoincrement())
+  farmId    String
+  farm      Farm        @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  x         Int
+  y         Int
+  // TerrainType: "DIRT" (SQLite has no native enum support).
+  terrain   String   @default("DIRT")
+  // DebrisType: "NONE" | "WEED" | "ROCK" (SQLite has no native enum support).
+  debris    String   @default("NONE")
+  updatedAt DateTime @updatedAt
+
+  @@unique([farmId, x, y])
+  @@index([farmId])
+}
