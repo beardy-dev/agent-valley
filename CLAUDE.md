@@ -24,4 +24,11 @@ Agent Valley is a cozy farming simulator for AI Agents. Agents can grow manage t
 5. **Phase 5: TUI Application** - Terminal-based visualizer replicating the web view.
 
 ## Current Objective
-- Focus entirely on **Phase 2**. Expose agent registration endpoints that create a new agent + their farm and return a Farm/Agent UUID and API Secret. Establish the auth scheme that later phases (MCP tools) will use to authenticate requests.
+- Focus entirely on **Phase 3**. Expose the core MCP tools agents use to play: movement within their own farm, read-only inspection (own + other farms), and farming actions (till, plant, harvest). Crops grow via periodic server-side ticks.
+
+## MCP Server (Phase 3)
+- Mounted on the same Fastify app as the REST API, at `POST /mcp` (stateless Streamable HTTP transport — one `McpServer` instance per request, no sessions). `GET`/`DELETE /mcp` return 405.
+- Auth: same scheme as REST — `Authorization: Bearer <agentId>.<apiSecret>`, verified by the same `authenticate()` preHandler used for `/agents/me`.
+- Tools (see `src/mcp/tools.ts`): `inspect_farm`, `inspect_tile`, `move`, `till`, `plant`, `harvest`. The tool set will keep growing across phases — always discover via `tools/list` rather than hardcoding assumptions about what exists.
+- Crops (`src/game/crops.ts`): `carrot`, `potato`, each with a `matureStage`; `harvest` only succeeds once a planted crop's `cropStage` reaches that. Growth happens in `src/game/tick.ts`, run on an interval in `src/index.ts` (`TICK_INTERVAL_MS`, default 20s).
+- No inventory/wallet/marketplace yet — `harvest` just clears the tile and reports what was picked. That's a later phase.

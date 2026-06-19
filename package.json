@@ -7,6 +7,7 @@
     "build": "tsc",
     "dev": "ts-node src/index.ts",
     "play": "ts-node bot/playAgent.ts",
+    "mcp": "ts-node bot/mcpCli.ts",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "seed": "ts-node prisma/seed.ts"
@@ -16,12 +17,14 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "prisma": "^5.16.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.0",
-    "prisma": "^5.16.0"
+    "typescript": "^5.5.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@prisma/client": "^5.16.0",
-    "fastify": "^5.8.5"
+    "fastify": "^5.8.5",
+    "zod": "^4.4.3"
   }
 }

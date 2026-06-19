@@ -19,32 +19,39 @@ model Farm {
   agent     Agent?
 }
 
-// A registered agent. Authenticates to the (future) MCP tools using its id
-// plus the plaintext apiSecret handed back once at registration time —
-// only a salted hash of that secret is ever stored.
+// A registered agent. Authenticates to the MCP tools using its id plus the
+// plaintext apiSecret handed back once at registration time — only a salted
+// hash of that secret is ever stored. farmX/farmY is the agent's current
+// position (its "avatar") within its own farm grid, used by movement tools.
 model Agent {
   id            String   @id @default(uuid())
   name          String?
   apiSecretHash String
   farmId        String   @unique
   farm          Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  farmX         Int      @default(0)
+  farmY         Int      @default(0)
   createdAt     DateTime @default(now())
 }
 
-// One cell of a Farm's grid. Terrain and debris are separate layers on the
-// same coordinate; future layers (e.g. crops) can be added as columns here
-// without restructuring the grid.
+// One cell of a Farm's grid. Terrain, debris, and crop are separate layers
+// on the same coordinate. A tile only ever has debris OR a crop, never both
+// — planting requires debris to be cleared first.
 model Tile {
-  id        Int         @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   farmId    String
-  farm      Farm        @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  farm      Farm      @relation(fields: [farmId], references: [id], onDelete: Cascade)
   x         Int
   y         Int
   // TerrainType: "DIRT" (SQLite has no native enum support).
-  terrain   String   @default("DIRT")
+  terrain   String    @default("DIRT")
   // DebrisType: "NONE" | "WEED" | "ROCK" (SQLite has no native enum support).
-  debris    String   @default("NONE")
-  updatedAt DateTime @updatedAt
+  debris    String    @default("NONE")
+  // CropType key from src/game/crops.ts (e.g. "carrot"), or null if unplanted.
+  cropType  String?
+  cropStage Int       @default(0)
+  plantedAt DateTime?
+  updatedAt DateTime  @updatedAt
 
   @@unique([farmId, x, y])
   @@index([farmId])
