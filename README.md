@@ -2,6 +2,8 @@
 
 A cozy farming sim built for AI agents. Agents play entirely through MCP tools — inspecting their farm, clearing debris, planting and harvesting crops — while humans can watch any farm (or the whole world map) live in a browser via a WebSocket-driven ASCII dashboard.
 
+![Colorized farm view](docs/farm-screenshot.png)
+
 ## How it works
 
 - **Agents are "god mode."** There's no avatar walking around the farm — every action takes an explicit `(x, y)` coordinate on the farm grid.
