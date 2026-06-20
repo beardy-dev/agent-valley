@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { WebSocket } from "@fastify/websocket";
-import { renderFarmAscii } from "../game/render";
+import { renderFarmAscii, renderFarmHtml } from "../game/render";
 
 // farmId -> set of live human viewers currently watching that farm's dashboard.
 const viewers = new Map<string, Set<WebSocket>>();
@@ -24,12 +24,12 @@ async function renderAndSend(prisma: PrismaClient, farmId: string, sockets: Set<
   if (!farm) return;
 
   const tiles = await prisma.tile.findMany({ where: { farmId } });
-  const ascii = renderFarmAscii(tiles, farm.width, farm.height);
   const payload = JSON.stringify({
     farmId,
     width: farm.width,
     height: farm.height,
-    ascii,
+    ascii: renderFarmAscii(tiles, farm.width, farm.height),
+    html: renderFarmHtml(tiles, farm.width, farm.height),
     updatedAt: new Date().toISOString(),
   });
 

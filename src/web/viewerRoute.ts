@@ -1,8 +1,22 @@
 import { FastifyInstance } from "fastify";
 import { PrismaClient } from "@prisma/client";
 import { broadcast, subscribe } from "./connections";
+import { DEBRIS_COLORS, DEBRIS_SYMBOLS } from "../game/render";
+import { CROPS } from "../game/crops";
 
-const LEGEND = "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop";
+function swatch(color: string, symbol: string): string {
+  return `<span style="color:${color};">${symbol}</span>`;
+}
+
+const LEGEND = [
+  `Legend: ${swatch(DEBRIS_COLORS.NONE, DEBRIS_SYMBOLS.NONE)} dirt`,
+  `${swatch(DEBRIS_COLORS.WEED, DEBRIS_SYMBOLS.WEED)} weed`,
+  `${swatch(DEBRIS_COLORS.ROCK, DEBRIS_SYMBOLS.ROCK)} rock`,
+  ...Object.entries(CROPS).map(
+    ([name, def]) =>
+      `${swatch(def.growingColor, def.growingSymbol)}/${swatch(def.matureColor, def.matureSymbol)} ${name} (growing/mature)`
+  ),
+].join(" | ");
 
 export function registerViewerRoutes(app: FastifyInstance, prisma: PrismaClient) {
   app.get("/farms/:farmId", async (request, reply) => {
@@ -67,7 +81,7 @@ function renderViewerPage(farmId: string, name: string | null): string {
       const data = JSON.parse(event.data);
       if (data.error) { meta.textContent = data.error; return; }
       meta.textContent = "updated " + data.updatedAt;
-      grid.textContent = data.ascii;
+      grid.innerHTML = data.html;
     };
   </script>
 </body>
