@@ -49,7 +49,12 @@ export async function broadcast(prisma: PrismaClient, farmId: string): Promise<v
   await renderAndSend(prisma, farmId, sockets);
 }
 
-// Push current state to every farm that has at least one live viewer — called after each tick.
-export async function broadcastAll(prisma: PrismaClient): Promise<void> {
-  await Promise.all([...viewers.entries()].map(([farmId, sockets]) => renderAndSend(prisma, farmId, sockets)));
+// Push current state to every farm that has at least one live viewer.
+// If `farmIds` is given, only farms in that set are re-rendered/sent — used
+// after a tick so farms with no crop growth this tick aren't needlessly
+// re-fetched and re-rendered for viewers watching an unrelated farm.
+export async function broadcastAll(prisma: PrismaClient, farmIds?: Iterable<string>): Promise<void> {
+  const targets = farmIds ? new Set(farmIds) : undefined;
+  const entries = [...viewers.entries()].filter(([farmId]) => !targets || targets.has(farmId));
+  await Promise.all(entries.map(([farmId, sockets]) => renderAndSend(prisma, farmId, sockets)));
 }

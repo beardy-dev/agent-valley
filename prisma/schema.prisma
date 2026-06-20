@@ -7,16 +7,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// A single agent's 50x50 farm, addressed by UUID for save/load.
+// A single agent's 50x50 farm, addressed by UUID for save/load. worldX/worldY
+// place this farm on the shared, ever-expanding world grid (see
+// src/farmGen/worldPlacement.ts) so farms can be located relative to their
+// neighbors on the world map.
 model Farm {
   id        String   @id @default(uuid())
   name      String?
   width     Int      @default(50)
   height    Int      @default(50)
+  worldX    Int      @default(0)
+  worldY    Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tiles     Tile[]
   agent     Agent?
+
+  @@unique([worldX, worldY])
 }
 
 // A registered agent. Authenticates to the MCP tools using its id plus the

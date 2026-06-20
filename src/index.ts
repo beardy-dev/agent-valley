@@ -8,13 +8,24 @@ const tickIntervalMs = Number(process.env.TICK_INTERVAL_MS ?? 20_000);
 
 const app = buildServer();
 
+// Guards against overlapping ticks: if advanceTick + broadcastAll ever takes
+// longer than tickIntervalMs, the next scheduled tick is skipped rather than
+// running concurrently and double-incrementing crop stages.
+let tickInProgress = false;
+
 const tickHandle = setInterval(() => {
+  if (tickInProgress) return;
+  tickInProgress = true;
+
   advanceTick(prisma)
-    .then(({ grown }) => {
+    .then(({ grown, affectedFarmIds }) => {
       if (grown > 0) app.log.info(`tick: ${grown} crop(s) advanced`);
-      return broadcastAll(prisma);
+      return broadcastAll(prisma, affectedFarmIds);
     })
-    .catch((err) => app.log.error(err, "tick failed"));
+    .catch((err) => app.log.error(err, "tick failed"))
+    .finally(() => {
+      tickInProgress = false;
+    });
 }, tickIntervalMs);
 
 app

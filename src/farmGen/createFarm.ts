@@ -1,5 +1,10 @@
-import { PrismaClient, Farm } from "@prisma/client";
+import { PrismaClient, Farm, Prisma } from "@prisma/client";
 import { generateDebrisGrid } from "./generateDebrisGrid";
+import { spiralPosition } from "./worldPlacement";
+
+// Accepts either the top-level PrismaClient or an interactive transaction
+// client, so callers can wrap farm + agent creation in one atomic write.
+export type Db = PrismaClient | Prisma.TransactionClient;
 
 export interface CreatedFarm {
   farm: Farm;
@@ -8,12 +13,19 @@ export interface CreatedFarm {
 }
 
 export async function createFarmWithTiles(
-  prisma: PrismaClient,
+  prisma: Db,
   name: string,
   width = 50,
   height = 50
 ): Promise<CreatedFarm> {
-  const farm = await prisma.farm.create({ data: { name, width, height } });
+  // Counting existing farms to pick the next spiral slot only avoids
+  // collisions when this call runs inside a transaction (the count and the
+  // create commit atomically); the @@unique([worldX, worldY]) constraint is
+  // the actual guarantee against two farms landing on the same world tile.
+  const placementIndex = await prisma.farm.count();
+  const { x: worldX, y: worldY } = spiralPosition(placementIndex);
+
+  const farm = await prisma.farm.create({ data: { name, width, height, worldX, worldY } });
   const debrisGrid = generateDebrisGrid(width, height);
 
   let weedCount = 0;

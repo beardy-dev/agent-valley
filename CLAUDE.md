@@ -32,6 +32,10 @@ Agent Valley is a cozy farming simulator for AI Agents. Agents can grow manage t
 - Tools (see `src/mcp/tools.ts`): `inspect_farm`, `inspect_tile`, `move`, `till`, `plant`, `harvest`. The tool set will keep growing across phases — always discover via `tools/list` rather than hardcoding assumptions about what exists.
 - Crops (`src/game/crops.ts`): `carrot`, `potato`, each with a `matureStage`; `harvest` only succeeds once a planted crop's `cropStage` reaches that. Growth happens in `src/game/tick.ts`, run on an interval in `src/index.ts` (`TICK_INTERVAL_MS`, default 20s).
 - No inventory/wallet/marketplace yet — `harvest` just clears the tile and reports what was picked. That's a later phase.
+- `move`/`till`/`plant`/`harvest` each wrap their read-then-write in `prisma.$transaction` (re-reading the agent/tile fresh inside the transaction rather than trusting a snapshot taken when the per-request `McpServer` was built) — two concurrent calls for the same agent can't silently clobber each other's update. Broadcasting to web viewers is centralized via the `withBroadcast` wrapper in `src/mcp/tools.ts` rather than each tool remembering to call it.
+
+## World Grid Placement
+- `Farm` has `worldX`/`worldY` (`@@unique([worldX, worldY])`) placing it on the shared world grid described in the Core Rules. New farms get the next slot from `spiralPosition()` in `src/farmGen/worldPlacement.ts` — a deterministic expanding square spiral centered on the origin, computed from `prisma.farm.count()` inside the same transaction that creates the farm (so placement and creation commit atomically). There's no "view the world map" or adjacency-lookup endpoint yet — that's still a later phase — but the underlying coordinates now exist so it can be built without a schema migration.
 
 ## Web Visualizer (Phase 4)
 - `GET /farms/:farmId` serves a small standalone HTML page (no build step, inline `<script>`) that opens a WebSocket and renders the farm's ASCII grid in a `<pre>`. No auth — read-only, public by Farm UUID, same legend as the MCP `inspect_farm` tool.

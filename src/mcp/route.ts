@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { PrismaClient } from "@prisma/client";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { authenticate } from "../auth/authenticate";
 import { buildGameMcpServer } from "./tools";
@@ -17,10 +18,16 @@ export function registerMcpRoute(app: FastifyInstance, prisma: PrismaClient) {
     const agent = request.agent!;
     reply.hijack();
 
-    const server = await buildGameMcpServer(prisma, agent);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    let server: McpServer | undefined;
 
     try {
+      // buildGameMcpServer does its own Prisma lookup and can throw (e.g. a
+      // transient DB error); it must run inside this try block since
+      // reply.hijack() already told Fastify not to handle the response —
+      // anything thrown after hijack() but outside this try would otherwise
+      // leave the request hanging with no response ever written.
+      server = await buildGameMcpServer(prisma, agent);
       await server.connect(transport);
       await transport.handleRequest(request.raw, reply.raw, request.body);
     } catch (err) {
@@ -32,7 +39,7 @@ export function registerMcpRoute(app: FastifyInstance, prisma: PrismaClient) {
     } finally {
       reply.raw.on("close", () => {
         transport.close();
-        server.close();
+        server?.close();
       });
     }
   });
