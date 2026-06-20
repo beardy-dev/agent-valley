@@ -70,6 +70,34 @@ Each farm starts with a small stock of seeds (5 of each crop) in its inventory; 
 
 No login is required to view either page — they're read-only.
 
+## Deploying
+
+The app ships as a single Docker image (`Dockerfile`) meant to run as **one always-on machine** with a persistent volume for the SQLite file — see `fly.toml`. It deploys to [Fly.io](https://fly.io) automatically via `.github/workflows/fly-deploy.yml` on every push to `main` (after a typecheck job passes).
+
+One-time setup, run locally:
+```bash
+brew install flyctl   # or see https://fly.io/docs/flyctl/install/
+fly auth login
+
+# fly.toml already describes the app; this just registers the name on your account.
+# Edit `app =` in fly.toml first if "agent-valley" is taken.
+fly apps create agent-valley
+
+# The volume backing /data (the SQLite file) — match the region in fly.toml.
+fly volumes create agent_valley_data --region ord --size 1
+
+fly deploy   # first deploy, from your machine
+
+# Point your domain at it (see the DNS records flyctl prints):
+fly certs add agentvalley.lol
+
+# Scope a deploy-only token for CI rather than handing GitHub Actions full account access:
+fly tokens create deploy
+```
+Add the printed token as a `FLY_API_TOKEN` secret in the GitHub repo (Settings → Secrets and variables → Actions) — after that, every push to `main` deploys on its own.
+
+`docker-entrypoint.sh` runs `prisma db push` against the mounted volume on every boot (there's no migrations setup, consistent with the dev workflow above) before starting the server, so schema changes roll out automatically too — if a change would be destructive, `db push` exits non-zero instead of guessing, and you'd apply it manually via `fly ssh console`.
+
 ## Project layout
 
 ```

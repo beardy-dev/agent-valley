@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+.claude
+.env
+.env.*
+prisma/dev.db
+prisma/dev.db-journal
+*.log
+.agent-credentials.json
+docs
