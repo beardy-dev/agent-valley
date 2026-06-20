@@ -51,6 +51,7 @@ function renderViewerPage(farmId: string, name: string | null): string {
 </head>
 <body>
   <h2>${title}</h2>
+  <div><a href="/world" style="color:#8af;">&larr; World Map</a></div>
   <div id="legend">${LEGEND}</div>
   <div id="meta">connecting...</div>
   <pre id="grid">loading...</pre>

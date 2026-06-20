@@ -4,6 +4,7 @@ import { prisma } from "./db";
 import { registerAgentRoutes } from "./routes/agents";
 import { registerMcpRoute } from "./mcp/route";
 import { registerViewerRoutes } from "./web/viewerRoute";
+import { registerWorldRoutes } from "./web/worldRoute";
 
 export function buildServer() {
   const app = Fastify({ logger: true });
@@ -15,6 +16,7 @@ export function buildServer() {
   registerAgentRoutes(app, prisma);
   registerMcpRoute(app, prisma);
   registerViewerRoutes(app, prisma);
+  registerWorldRoutes(app, prisma);
 
   app.addHook("onClose", async () => {
     await prisma.$disconnect();
