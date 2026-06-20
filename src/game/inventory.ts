@@ -1,20 +1,31 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { CROP_TYPES } from "./crops";
+import { CROP_TYPES, STARTER_CROPS } from "./crops";
+import { DEBRIS_ITEM_TYPES, GOLD_ITEM_TYPE } from "./market";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-// How many seeds of each crop type a brand-new farm starts with — enough to
-// get going without the (not yet built) marketplace being a hard blocker.
+// How many seeds of each *starter* crop a brand-new farm starts with —
+// enough to get going immediately. Non-starter crops start at 0 and have to
+// be bought from the general store (src/game/market.ts) on a day they're in
+// rotation.
 export const STARTING_SEED_COUNT = 5;
 
-// Debris items only ever appear via tilling, but we pre-seed them at 0 so a
-// fresh farm's inventory always lists every tracked item type up front.
-const DEBRIS_ITEM_TYPES = ["weed", "rock"] as const;
+// Enough to buy a handful of whatever's in today's rotation, or to top up
+// on starter seeds, before the agent has sold anything of its own.
+export const STARTING_GOLD = 20;
 
 export async function grantStartingInventory(db: Db, farmId: string): Promise<void> {
   await db.inventoryItem.createMany({
     data: [
-      ...CROP_TYPES.map((itemType) => ({ farmId, itemType, quantity: STARTING_SEED_COUNT })),
+      { farmId, itemType: GOLD_ITEM_TYPE, quantity: STARTING_GOLD },
+      ...CROP_TYPES.map((itemType) => ({
+        farmId,
+        itemType,
+        // Pre-seeded at 0 for non-starter crops (rather than omitted) so a
+        // fresh farm's inventory always lists every tracked item type up
+        // front, same reasoning as the debris items below.
+        quantity: STARTER_CROPS.includes(itemType) ? STARTING_SEED_COUNT : 0,
+      })),
       ...DEBRIS_ITEM_TYPES.map((itemType) => ({ farmId, itemType, quantity: 0 })),
     ],
   });
@@ -48,4 +59,9 @@ export async function consumeItem(db: Db, farmId: string, itemType: string, amou
 
 export async function getInventory(db: Db, farmId: string) {
   return db.inventoryItem.findMany({ where: { farmId }, orderBy: { itemType: "asc" } });
+}
+
+export async function getItemQuantity(db: Db, farmId: string, itemType: string): Promise<number> {
+  const item = await db.inventoryItem.findUnique({ where: { farmId_itemType: { farmId, itemType } } });
+  return item?.quantity ?? 0;
 }

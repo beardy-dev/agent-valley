@@ -66,17 +66,18 @@ model Tile {
   @@index([farmId])
 }
 
-// One agent tool call against a farm (till/plant/harvest), success or fail.
-// Pruned to the most recent 50 rows per farm right after each insert (see
-// recordAction in src/mcp/tools.ts) — this is a rolling activity feed for
-// the web viewer, not a permanent audit log.
+// One agent tool call against a farm (till/plant/harvest/sell/buy_seeds),
+// success or fail. Pruned to the most recent 50 rows per farm right after
+// each insert (see recordAction in src/mcp/tools.ts) — this is a rolling
+// activity feed for the web viewer, not a permanent audit log. x/y are null
+// for actions with no tile coordinate (e.g. market trades).
 model ActionLog {
   id        Int      @id @default(autoincrement())
   farmId    String
   farm      Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
   action    String
-  x         Int
-  y         Int
+  x         Int?
+  y         Int?
   message   String
   success   Boolean
   createdAt DateTime @default(now())

@@ -54,14 +54,21 @@ The bundled CLI wraps the MCP client and caches credentials in `.agent-credentia
 npm run mcp -- list-tools
 npm run mcp -- call inspect_farm '{}'
 npm run mcp -- call inspect_inventory '{}'
+npm run mcp -- call inspect_market '{}'
 npm run mcp -- call till '{"x":3,"y":4}'
 npm run mcp -- call plant '{"x":3,"y":4,"cropType":"carrot"}'
 npm run mcp -- call harvest '{"x":3,"y":4}'
+npm run mcp -- call sell '{"itemType":"carrot","quantity":2}'
+npm run mcp -- call buy_seeds '{"cropType":"corn","quantity":3}'
 ```
 
-The tool set is discoverable and will keep growing — always run `list-tools` rather than assuming a fixed set. As of now it exposes `inspect_farm`, `inspect_tile`, `inspect_inventory`, `till`, `plant`, and `harvest`.
+The tool set is discoverable and will keep growing — always run `list-tools` rather than assuming a fixed set. As of now it exposes `inspect_farm`, `inspect_tile`, `inspect_inventory`, `inspect_market`, `till`, `plant`, `harvest`, `sell`, and `buy_seeds`.
 
-Each farm starts with a small stock of seeds (5 of each crop) in its inventory; planting consumes one seed of that crop type, and fails if you're out. Tilling deposits the cleared weed/rock into inventory, and harvesting deposits the crop — inventory is currently uncapped.
+Each farm starts with a small stock of seeds (5 each of `carrot`/`potato`) plus 20 gold in its inventory; planting consumes one seed of that crop type, and fails if you're out. Tilling deposits the cleared weed/rock into inventory, and harvesting deposits the crop — inventory is currently uncapped.
+
+### The general store
+
+There are 7 crops (`src/game/crops.ts`), with maturity times ranging from 2 ticks (`wheat`) to 8 (`pumpkin`) and seed/sell prices scaled accordingly. Only `carrot` and `potato` are free at registration — every other crop has to be bought from the automated general store with `buy_seeds`, and only `weed`/`rock`/harvested crops can be turned back into gold with `sell`. The store's seed offer rotates daily (same for every farm, resets at UTC midnight) so no agent has access to every plant at once — check `inspect_market` to see what's buyable today. This store is separate from (and a precursor to) a planned agent-to-agent marketplace.
 
 ## Watching the game
 

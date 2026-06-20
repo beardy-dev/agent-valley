@@ -2,8 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { Agent, Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { CROP_TYPES, isCropType, isMature } from "../game/crops";
-import { addItem, consumeItem, getInventory } from "../game/inventory";
+import { CROP_TYPES, CROPS, isCropType, isMature } from "../game/crops";
+import { addItem, consumeItem, getInventory, getItemQuantity } from "../game/inventory";
+import { GOLD_ITEM_TYPE, SELLABLE_ITEM_TYPES, getSellPrice, getTodaysSeedOffer } from "../game/market";
 import { renderFarmAscii } from "../game/render";
 import { broadcast, HISTORY_LIMIT } from "../web/connections";
 
@@ -41,8 +42,8 @@ async function recordAction(
   prisma: PrismaClient,
   farmId: string,
   action: string,
-  x: number,
-  y: number,
+  x: number | null,
+  y: number | null,
   message: string,
   success: boolean
 ): Promise<void> {
@@ -67,8 +68,10 @@ async function recordAction(
 // Wraps a mutating tool handler so every attempt — success or fail — is
 // recorded to the farm's action history and broadcast to live web viewers.
 // Callers never have to remember to call recordAction()/broadcast()
-// themselves, so a future tool can't forget either.
-function withGameLog<Arg extends { x: number; y: number }>(
+// themselves, so a future tool can't forget either. Arg doesn't have to
+// carry x/y — market tools (sell/buy_seeds) act on the farm as a whole, not
+// a tile, and just log with null coordinates.
+function withGameLog<Arg>(
   prisma: PrismaClient,
   farmId: string,
   action: string,
@@ -76,7 +79,8 @@ function withGameLog<Arg extends { x: number; y: number }>(
 ): (arg: Arg) => Promise<CallToolResult> {
   return async (arg: Arg) => {
     const result = await handler(arg);
-    await recordAction(prisma, farmId, action, arg.x, arg.y, resultText(result), !result.isError);
+    const coords = arg as { x?: number; y?: number };
+    await recordAction(prisma, farmId, action, coords.x ?? null, coords.y ?? null, resultText(result), !result.isError);
     await broadcast(prisma, farmId);
     return result;
   };
@@ -202,6 +206,28 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
   );
 
   server.registerTool(
+    "inspect_market",
+    {
+      description:
+        "View the general store: today's crop seeds for sale (rotates daily), sell prices for crops/debris, and your gold (read-only).",
+      inputSchema: {},
+    },
+    withEventLog(prisma, agent.id, agent.farmId, "inspect_market", async () => {
+      const offer = getTodaysSeedOffer();
+      const gold = await getItemQuantity(prisma, agent.farmId, GOLD_ITEM_TYPE);
+
+      const seedLines = offer.map((cropType) => `  ${cropType}: ${CROPS[cropType].seedCost} gold/seed`).join("\n");
+      const sellLines = SELLABLE_ITEM_TYPES.map((itemType) => `  ${itemType}: ${getSellPrice(itemType)} gold each`).join("\n");
+
+      return ok(
+        `Today's seeds for sale (rotates daily):\n${seedLines}\n\n` +
+          `Sell prices (use the "sell" tool):\n${sellLines}\n\n` +
+          `Your gold: ${gold}`
+      );
+    })
+  );
+
+  server.registerTool(
     "till",
     {
       description: "Clear debris (weeds/rocks) from the tile at the given coordinate.",
@@ -288,6 +314,70 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
           });
           const quantity = await addItem(tx, agent.farmId, cropType, 1);
           return ok(`Harvested 1 ${cropType} from (${tile.x}, ${tile.y}). You now have ${quantity} ${cropType} in your inventory.`);
+        });
+      })
+    )
+  );
+
+  server.registerTool(
+    "sell",
+    {
+      description: "Sell crops or debris from your inventory to the general store for gold.",
+      inputSchema: {
+        itemType: z.enum(SELLABLE_ITEM_TYPES).describe("A crop type, or debris: weed/rock"),
+        quantity: z.number().int().min(1).max(1000).default(1),
+      },
+    },
+    withEventLog(
+      prisma,
+      agent.id,
+      agent.farmId,
+      "sell",
+      withGameLog(prisma, agent.farmId, "sell", async ({ itemType, quantity }) => {
+        const price = getSellPrice(itemType);
+        if (price === undefined) return fail(`${itemType} can't be sold.`);
+
+        return prisma.$transaction(async (tx) => {
+          const remaining = await consumeItem(tx, agent.farmId, itemType, quantity);
+          if (remaining === null) return fail(`You don't have ${quantity} ${itemType} to sell.`);
+
+          const earned = price * quantity;
+          const gold = await addItem(tx, agent.farmId, GOLD_ITEM_TYPE, earned);
+          return ok(`Sold ${quantity} ${itemType} for ${earned} gold. ${remaining} ${itemType} left, ${gold} gold total.`);
+        });
+      })
+    )
+  );
+
+  server.registerTool(
+    "buy_seeds",
+    {
+      description: "Buy seeds of a crop type from today's market rotation (see inspect_market), spending gold.",
+      inputSchema: {
+        cropType: z.enum(CROP_TYPES),
+        quantity: z.number().int().min(1).max(1000).default(1),
+      },
+    },
+    withEventLog(
+      prisma,
+      agent.id,
+      agent.farmId,
+      "buy_seeds",
+      withGameLog(prisma, agent.farmId, "buy_seeds", async ({ cropType, quantity }) => {
+        const todaysOffer = getTodaysSeedOffer();
+        if (!todaysOffer.includes(cropType)) {
+          return fail(`${cropType} isn't in today's market rotation (today: ${todaysOffer.join(", ")}). Check back tomorrow.`);
+        }
+
+        const cost = CROPS[cropType].seedCost * quantity;
+        return prisma.$transaction(async (tx) => {
+          const remainingGold = await consumeItem(tx, agent.farmId, GOLD_ITEM_TYPE, cost);
+          if (remainingGold === null) {
+            return fail(`You need ${cost} gold to buy ${quantity} ${cropType} seed(s) but don't have enough.`);
+          }
+
+          const seeds = await addItem(tx, agent.farmId, cropType, quantity);
+          return ok(`Bought ${quantity} ${cropType} seed(s) for ${cost} gold. ${remainingGold} gold left, ${seeds} ${cropType} seed(s) total.`);
         });
       })
     )

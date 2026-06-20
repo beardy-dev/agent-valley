@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { broadcast, HISTORY_LIMIT, subscribe } from "./connections";
 import { DEBRIS_COLORS, DEBRIS_SYMBOLS } from "../game/render";
 import { CROPS } from "../game/crops";
+import { GOLD_ITEM_TYPE } from "../game/market";
 import { escapeHtml } from "./html";
 
 function swatch(color: string, symbol: string): string {
@@ -21,8 +22,10 @@ const LEGEND = [
 
 // Icon shown per inventory item type — debris uses its tile symbol/color,
 // crops use the mature symbol/color since inventory holds seeds *and*
-// harvested produce under the same key (see src/game/inventory.ts).
+// harvested produce under the same key (see src/game/inventory.ts). Gold
+// isn't a tile/crop, so it gets a hand-picked icon instead of a derived one.
 const ITEM_ICONS: Record<string, { symbol: string; color: string }> = {
+  [GOLD_ITEM_TYPE]: { symbol: "$", color: "#ffd700" },
   weed: { symbol: DEBRIS_SYMBOLS.WEED, color: DEBRIS_COLORS.WEED },
   rock: { symbol: DEBRIS_SYMBOLS.ROCK, color: DEBRIS_COLORS.ROCK },
   ...Object.fromEntries(
@@ -163,9 +166,10 @@ function renderViewerPage(farmId: string, name: string | null): string {
         const time = new Date(a.createdAt).toLocaleTimeString();
         const cls = a.success ? "history-ok" : "history-fail";
         const icon = a.success ? "\\u2713" : "\\u2717";
+        const coords = (a.x !== null && a.y !== null) ? ' (' + a.x + ', ' + a.y + ')' : '';
         return '<div class="history-entry">' +
           '<span class="history-time">' + time + '</span> ' +
-          '<span class="' + cls + '">' + icon + ' ' + escapeHtml(a.action) + ' (' + a.x + ', ' + a.y + ')</span>' +
+          '<span class="' + cls + '">' + icon + ' ' + escapeHtml(a.action) + coords + '</span>' +
           '<span class="history-message">' + escapeHtml(a.message) + '</span>' +
           '</div>';
       }).join("");
