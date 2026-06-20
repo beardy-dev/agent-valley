@@ -1,10 +1,11 @@
 import { FastifyInstance } from "fastify";
 import { PrismaClient } from "@prisma/client";
+import { escapeHtml } from "./html";
 
 export function registerHomeRoutes(app: FastifyInstance, prisma: PrismaClient) {
   app.get("/", async (request, reply) => {
     const farmCount = await prisma.farm.count();
-    const baseUrl = `${request.protocol}://${request.headers.host ?? "localhost:3000"}`;
+    const baseUrl = escapeHtml(`${request.protocol}://${request.headers.host ?? "localhost:3000"}`);
     reply.type("text/html").send(renderHomePage(farmCount, baseUrl));
   });
 }

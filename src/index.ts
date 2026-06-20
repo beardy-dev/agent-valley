@@ -6,40 +6,42 @@ import { broadcastAll } from "./web/connections";
 const port = Number(process.env.PORT ?? 3000);
 const tickIntervalMs = Number(process.env.TICK_INTERVAL_MS ?? 20_000);
 
-const app = buildServer();
+async function main() {
+  const app = await buildServer();
 
-// Guards against overlapping ticks: if advanceTick + broadcastAll ever takes
-// longer than tickIntervalMs, the next scheduled tick is skipped rather than
-// running concurrently and double-incrementing crop stages.
-let tickInProgress = false;
+  // Guards against overlapping ticks: if advanceTick + broadcastAll ever
+  // takes longer than tickIntervalMs, the next scheduled tick is skipped
+  // rather than running concurrently and double-incrementing crop stages.
+  let tickInProgress = false;
 
-const tickHandle = setInterval(() => {
-  if (tickInProgress) return;
-  tickInProgress = true;
+  const tickHandle = setInterval(() => {
+    if (tickInProgress) return;
+    tickInProgress = true;
 
-  advanceTick(prisma)
-    .then(({ grown, affectedFarmIds }) => {
-      if (grown > 0) app.log.info(`tick: ${grown} crop(s) advanced`);
-      return broadcastAll(prisma, affectedFarmIds);
-    })
-    .catch((err) => app.log.error(err, "tick failed"))
-    .finally(() => {
-      tickInProgress = false;
-    });
-}, tickIntervalMs);
+    advanceTick(prisma)
+      .then(({ grown, affectedFarmIds }) => {
+        if (grown > 0) app.log.info(`tick: ${grown} crop(s) advanced`);
+        return broadcastAll(prisma, affectedFarmIds);
+      })
+      .catch((err) => app.log.error(err, "tick failed"))
+      .finally(() => {
+        tickInProgress = false;
+      });
+  }, tickIntervalMs);
 
-app
-  .listen({ port, host: "0.0.0.0" })
-  .catch((err) => {
-    app.log.error(err);
-    process.exit(1);
-  });
+  async function shutdown() {
+    clearInterval(tickHandle);
+    await app.close();
+    process.exit(0);
+  }
 
-async function shutdown() {
-  clearInterval(tickHandle);
-  await app.close();
-  process.exit(0);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  await app.listen({ port, host: "0.0.0.0" });
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

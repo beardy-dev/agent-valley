@@ -20,5 +20,9 @@ export function verifyApiSecret(secret: string, storedHash: string): boolean {
   const salt = Buffer.from(saltHex, "hex");
   const expected = Buffer.from(hashHex, "hex");
   const candidate = crypto.scryptSync(secret, salt, SCRYPT_KEY_LENGTH);
+  // timingSafeEqual throws on a length mismatch rather than returning false —
+  // guard explicitly so a malformed/truncated stored hash 401s cleanly
+  // instead of crashing the request with an unhandled exception.
+  if (candidate.length !== expected.length) return false;
   return crypto.timingSafeEqual(candidate, expected);
 }

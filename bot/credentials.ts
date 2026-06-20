@@ -15,5 +15,9 @@ export function loadCredentials(filePath = DEFAULT_PATH): AgentCredentials | nul
 }
 
 export function saveCredentials(creds: AgentCredentials, filePath = DEFAULT_PATH): void {
-  fs.writeFileSync(filePath, JSON.stringify(creds, null, 2));
+  // mode only applies on file creation, so chmod explicitly afterward too —
+  // this file holds a plaintext bearer credential and must not be
+  // group/world-readable on a shared host.
+  fs.writeFileSync(filePath, JSON.stringify(creds, null, 2), { mode: 0o600 });
+  fs.chmodSync(filePath, 0o600);
 }

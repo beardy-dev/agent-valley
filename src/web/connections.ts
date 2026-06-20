@@ -5,18 +5,34 @@ import { renderFarmAscii, renderFarmHtml } from "../game/render";
 // farmId -> set of live human viewers currently watching that farm's dashboard.
 const viewers = new Map<string, Set<WebSocket>>();
 
-export function subscribe(farmId: string, socket: WebSocket): void {
+// The viewer endpoint is intentionally public/unauthenticated, so cap both
+// how many sockets can pile onto one farm and how many can pile onto the
+// server overall — without this, an attacker could open unbounded sockets
+// (farm ids are enumerable via /world/farms) and make every broadcast fan
+// out to an unbounded number of full-grid re-renders.
+const MAX_VIEWERS_PER_FARM = 50;
+const MAX_TOTAL_VIEWERS = 1000;
+let totalViewers = 0;
+
+export function subscribe(farmId: string, socket: WebSocket): boolean {
+  if (totalViewers >= MAX_TOTAL_VIEWERS) return false;
+
   let sockets = viewers.get(farmId);
   if (!sockets) {
     sockets = new Set();
     viewers.set(farmId, sockets);
   }
+  if (sockets.size >= MAX_VIEWERS_PER_FARM) return false;
+
   sockets.add(socket);
+  totalViewers++;
 
   socket.on("close", () => {
     sockets!.delete(socket);
     if (sockets!.size === 0) viewers.delete(farmId);
+    totalViewers--;
   });
+  return true;
 }
 
 // Single source of truth for "how much action history do we keep/show per

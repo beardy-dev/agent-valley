@@ -45,17 +45,22 @@ async function recordAction(
   message: string,
   success: boolean
 ): Promise<void> {
-  await prisma.actionLog.create({ data: { farmId, action, x, y, message, success } });
+  // Insert + prune run in one transaction so concurrent calls for the same
+  // farm can't both read a stale pre-insert count and let the row count
+  // creep past HISTORY_LIMIT.
+  await prisma.$transaction(async (tx) => {
+    await tx.actionLog.create({ data: { farmId, action, x, y, message, success } });
 
-  const stale = await prisma.actionLog.findMany({
-    where: { farmId },
-    orderBy: { createdAt: "desc" },
-    skip: HISTORY_LIMIT,
-    select: { id: true },
+    const stale = await tx.actionLog.findMany({
+      where: { farmId },
+      orderBy: { createdAt: "desc" },
+      skip: HISTORY_LIMIT,
+      select: { id: true },
+    });
+    if (stale.length > 0) {
+      await tx.actionLog.deleteMany({ where: { id: { in: stale.map((row) => row.id) } } });
+    }
   });
-  if (stale.length > 0) {
-    await prisma.actionLog.deleteMany({ where: { id: { in: stale.map((row) => row.id) } } });
-  }
 }
 
 // Wraps a mutating tool handler so every attempt — success or fail — is

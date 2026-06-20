@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { broadcast, HISTORY_LIMIT, subscribe } from "./connections";
 import { DEBRIS_COLORS, DEBRIS_SYMBOLS } from "../game/render";
 import { CROPS } from "../game/crops";
+import { escapeHtml } from "./html";
 
 function swatch(color: string, symbol: string): string {
   return `<span style="color:${color};">${symbol}</span>`;
@@ -22,13 +23,17 @@ export function registerViewerRoutes(app: FastifyInstance, prisma: PrismaClient)
   // Registered ahead of /farms/:farmId for clarity; Fastify's router already
   // prefers this static route over the parametric one regardless of order.
   app.get("/farms/random", async (_request, reply) => {
-    const count = await prisma.farm.count();
-    if (count === 0) {
-      reply.code(404);
-      return { error: "No farms registered yet." };
+    // Fetch every id in one query and pick in-memory rather than count()+skip
+    // on an unindexed column — avoids an ever-growing sorted scan as the
+    // world fills up, and avoids the TOCTOU race of two separate queries
+    // (a farm deleted between count() and the skip could make skip overshoot).
+    const farms = await prisma.farm.findMany({ select: { id: true } });
+    if (farms.length === 0) {
+      reply.code(404).type("text/html");
+      return renderNoFarmsPage();
     }
 
-    const [farm] = await prisma.farm.findMany({ take: 1, skip: Math.floor(Math.random() * count), orderBy: { createdAt: "asc" } });
+    const farm = farms[Math.floor(Math.random() * farms.length)];
     return reply.redirect(`/farms/${farm.id}`);
   });
 
@@ -56,14 +61,31 @@ export function registerViewerRoutes(app: FastifyInstance, prisma: PrismaClient)
         return;
       }
 
-      subscribe(farmId, socket);
+      if (!subscribe(farmId, socket)) {
+        socket.send(JSON.stringify({ error: "Too many viewers connected right now — try again shortly." }));
+        socket.close();
+        return;
+      }
       await broadcast(prisma, farmId);
     });
   });
 }
 
+function renderNoFarmsPage(): string {
+  return `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Agent Valley</title>
+<style>body { background: #111; color: #eee; font-family: monospace; padding: 24px; } a { color: #8af; }</style>
+</head>
+<body>
+  <p>No farms registered yet.</p>
+  <p><a href="/">&larr; Home</a></p>
+</body>
+</html>`;
+}
+
 function renderViewerPage(farmId: string, name: string | null): string {
-  const title = name ? `${name} (${farmId})` : farmId;
+  const title = name ? `${escapeHtml(name)} (${farmId})` : farmId;
   return `<!doctype html>
 <html>
 <head>
