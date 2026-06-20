@@ -81,6 +81,57 @@ function withGameLog<Arg extends { x: number; y: number }>(
   };
 }
 
+// Wraps any tool handler (read-only or mutating) so every call is recorded
+// permanently to EventLog for debugging/metrics — distinct from ActionLog,
+// which only covers till/plant/harvest and is pruned for the web viewer.
+// A logging failure must never break gameplay, so the insert is best-effort:
+// errors are swallowed (and reported to stderr) rather than thrown.
+function withEventLog<Arg>(
+  prisma: PrismaClient,
+  agentId: string,
+  farmId: string,
+  tool: string,
+  handler: (arg: Arg) => Promise<CallToolResult>
+): (arg: Arg) => Promise<CallToolResult> {
+  return async (arg: Arg) => {
+    const startedAt = Date.now();
+    let result: CallToolResult;
+    let success: boolean;
+    let message: string;
+    try {
+      result = await handler(arg);
+      success = !result.isError;
+      message = resultText(result);
+    } catch (err) {
+      success = false;
+      message = err instanceof Error ? err.message : String(err);
+      await logEvent(prisma, agentId, farmId, tool, arg, success, message, Date.now() - startedAt);
+      throw err;
+    }
+    await logEvent(prisma, agentId, farmId, tool, arg, success, message, Date.now() - startedAt);
+    return result;
+  };
+}
+
+async function logEvent(
+  prisma: PrismaClient,
+  agentId: string,
+  farmId: string,
+  tool: string,
+  input: unknown,
+  success: boolean,
+  message: string,
+  durationMs: number
+): Promise<void> {
+  try {
+    await prisma.eventLog.create({
+      data: { agentId, farmId, tool, input: JSON.stringify(input), success, message, durationMs },
+    });
+  } catch (err) {
+    console.error("Failed to write EventLog entry:", err);
+  }
+}
+
 /**
  * Builds a fresh MCP server (with all game tools registered) for a single
  * authenticated agent. Called once per HTTP request in the stateless
@@ -110,7 +161,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
         farmId: z.string().uuid().optional().describe("Farm UUID to inspect; omit to view your own farm"),
       },
     },
-    async ({ farmId }) => {
+    withEventLog(prisma, agent.id, agent.farmId, "inspect_farm", async ({ farmId }) => {
       const targetFarmId = farmId ?? agent.farmId;
       const targetFarm = await prisma.farm.findUnique({ where: { id: targetFarmId } });
       if (!targetFarm) return fail(`No farm found with id ${targetFarmId}`);
@@ -120,7 +171,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
 
       const legend = "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop";
       return ok(`Farm ${targetFarm.id} (${targetFarm.width}x${targetFarm.height})\n${legend}\n\n${ascii}`);
-    }
+    })
   );
 
   server.registerTool(
@@ -129,11 +180,11 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       description: "Inspect a single tile on your own farm by coordinate.",
       inputSchema: { x: xSchema, y: ySchema },
     },
-    async ({ x, y }) => {
+    withEventLog(prisma, agent.id, agent.farmId, "inspect_tile", async ({ x, y }) => {
       const tile = await prisma.tile.findUnique({ where: { farmId_x_y: { farmId: agent.farmId, x, y } } });
       if (!tile) return fail(`No tile at (${x}, ${y})`);
       return ok(describeTile(x, y, tile));
-    }
+    })
   );
 
   server.registerTool(
@@ -142,19 +193,25 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       description: "Clear debris (weeds/rocks) from the tile at the given coordinate.",
       inputSchema: { x: xSchema, y: ySchema },
     },
-    withGameLog(prisma, agent.farmId, "till", async ({ x, y }) => {
-      // The read and write run inside one transaction so a concurrent
-      // till/plant/harvest on the same tile can't pass its precondition
-      // check against a row this call is about to overwrite.
-      return prisma.$transaction(async (tx) => {
-        const tile = await getTile(tx, x, y);
-        if (tile.debris === "NONE") return fail("Nothing to till here — this tile is already clear.");
-        if (tile.cropType) return fail("Can't till a tile with a crop planted on it.");
+    withEventLog(
+      prisma,
+      agent.id,
+      agent.farmId,
+      "till",
+      withGameLog(prisma, agent.farmId, "till", async ({ x, y }) => {
+        // The read and write run inside one transaction so a concurrent
+        // till/plant/harvest on the same tile can't pass its precondition
+        // check against a row this call is about to overwrite.
+        return prisma.$transaction(async (tx) => {
+          const tile = await getTile(tx, x, y);
+          if (tile.debris === "NONE") return fail("Nothing to till here — this tile is already clear.");
+          if (tile.cropType) return fail("Can't till a tile with a crop planted on it.");
 
-        await tx.tile.update({ where: { id: tile.id }, data: { debris: "NONE" } });
-        return ok(`Cleared ${tile.debris.toLowerCase()} from (${tile.x}, ${tile.y}).`);
-      });
-    })
+          await tx.tile.update({ where: { id: tile.id }, data: { debris: "NONE" } });
+          return ok(`Cleared ${tile.debris.toLowerCase()} from (${tile.x}, ${tile.y}).`);
+        });
+      })
+    )
   );
 
   server.registerTool(
@@ -163,19 +220,25 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       description: "Plant a crop on the (cleared) tile at the given coordinate.",
       inputSchema: { x: xSchema, y: ySchema, cropType: z.enum(CROP_TYPES) },
     },
-    withGameLog(prisma, agent.farmId, "plant", async ({ x, y, cropType }) => {
-      return prisma.$transaction(async (tx) => {
-        const tile = await getTile(tx, x, y);
-        if (tile.debris !== "NONE") return fail(`This tile still has ${tile.debris.toLowerCase()} on it — till it first.`);
-        if (tile.cropType) return fail(`A ${tile.cropType} is already planted here.`);
+    withEventLog(
+      prisma,
+      agent.id,
+      agent.farmId,
+      "plant",
+      withGameLog(prisma, agent.farmId, "plant", async ({ x, y, cropType }) => {
+        return prisma.$transaction(async (tx) => {
+          const tile = await getTile(tx, x, y);
+          if (tile.debris !== "NONE") return fail(`This tile still has ${tile.debris.toLowerCase()} on it — till it first.`);
+          if (tile.cropType) return fail(`A ${tile.cropType} is already planted here.`);
 
-        await tx.tile.update({
-          where: { id: tile.id },
-          data: { cropType, cropStage: 0, plantedAt: new Date() },
+          await tx.tile.update({
+            where: { id: tile.id },
+            data: { cropType, cropStage: 0, plantedAt: new Date() },
+          });
+          return ok(`Planted ${cropType} at (${tile.x}, ${tile.y}). It will grow as the world ticks forward.`);
         });
-        return ok(`Planted ${cropType} at (${tile.x}, ${tile.y}). It will grow as the world ticks forward.`);
-      });
-    })
+      })
+    )
   );
 
   server.registerTool(
@@ -184,21 +247,27 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       description: "Harvest a mature crop from the tile at the given coordinate.",
       inputSchema: { x: xSchema, y: ySchema },
     },
-    withGameLog(prisma, agent.farmId, "harvest", async ({ x, y }) => {
-      return prisma.$transaction(async (tx) => {
-        const tile = await getTile(tx, x, y);
-        if (!tile.cropType) return fail("Nothing to harvest here.");
-        if (!isCropType(tile.cropType) || !isMature(tile.cropType, tile.cropStage)) {
-          return fail(`${tile.cropType} is still growing (stage ${tile.cropStage}) — check back after more ticks.`);
-        }
+    withEventLog(
+      prisma,
+      agent.id,
+      agent.farmId,
+      "harvest",
+      withGameLog(prisma, agent.farmId, "harvest", async ({ x, y }) => {
+        return prisma.$transaction(async (tx) => {
+          const tile = await getTile(tx, x, y);
+          if (!tile.cropType) return fail("Nothing to harvest here.");
+          if (!isCropType(tile.cropType) || !isMature(tile.cropType, tile.cropStage)) {
+            return fail(`${tile.cropType} is still growing (stage ${tile.cropStage}) — check back after more ticks.`);
+          }
 
-        await tx.tile.update({
-          where: { id: tile.id },
-          data: { cropType: null, cropStage: 0, plantedAt: null },
+          await tx.tile.update({
+            where: { id: tile.id },
+            data: { cropType: null, cropStage: 0, plantedAt: null },
+          });
+          return ok(`Harvested 1 ${tile.cropType} from (${tile.x}, ${tile.y}).`);
         });
-        return ok(`Harvested 1 ${tile.cropType} from (${tile.x}, ${tile.y}).`);
-      });
-    })
+      })
+    )
   );
 
   return server;

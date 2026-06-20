@@ -39,6 +39,7 @@ model Agent {
   farmId        String   @unique
   farm          Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
   createdAt     DateTime @default(now())
+  eventLogs     EventLog[]
 }
 
 // One cell of a Farm's grid. Terrain, debris, and crop are separate layers
@@ -80,4 +81,28 @@ model ActionLog {
   createdAt DateTime @default(now())
 
   @@index([farmId, createdAt])
+}
+
+// Every MCP tool call an agent makes — read-only inspections as well as
+// mutations — kept permanently (unlike ActionLog, this is never pruned).
+// Exists for debugging and metrics, not for the live web viewer, so it's
+// queried directly (sqlite3/Prisma Studio) rather than through an app route.
+model EventLog {
+  id          Int      @id @default(autoincrement())
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  // Denormalized alongside agentId so events stay queryable per-farm without
+  // a join, the same tradeoff ActionLog makes.
+  farmId      String
+  tool        String
+  // JSON-encoded tool input args (SQLite has no native Json type via Prisma).
+  input       String
+  success     Boolean
+  message     String
+  durationMs  Int
+  createdAt   DateTime @default(now())
+
+  @@index([agentId, createdAt])
+  @@index([farmId, createdAt])
+  @@index([tool, createdAt])
 }
