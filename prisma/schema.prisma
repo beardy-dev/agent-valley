@@ -23,6 +23,7 @@ model Farm {
   tiles      Tile[]
   agent      Agent?
   actionLogs ActionLog[]
+  inventory  InventoryItem[]
 
   @@unique([worldX, worldY])
 }
@@ -105,4 +106,18 @@ model EventLog {
   @@index([agentId, createdAt])
   @@index([farmId, createdAt])
   @@index([tool, createdAt])
+}
+
+// Per-farm counts of seeds, harvested crops, and debris cleared from tiles.
+// itemType is a CropType key (e.g. "carrot") for seeds/produce, or a
+// lowercased DebrisType ("weed"/"rock") for what tilling turns up. No cap on
+// quantity — inventory is unbounded/"infinite" for now, see src/game/inventory.ts.
+model InventoryItem {
+  id       Int    @id @default(autoincrement())
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  itemType String
+  quantity Int    @default(0)
+
+  @@unique([farmId, itemType])
 }

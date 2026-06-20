@@ -1,6 +1,7 @@
 import { PrismaClient, Farm, Prisma } from "@prisma/client";
 import { generateDebrisGrid } from "./generateDebrisGrid";
 import { spiralPosition } from "./worldPlacement";
+import { grantStartingInventory } from "../game/inventory";
 
 // Accepts either the top-level PrismaClient or an interactive transaction
 // client, so callers can wrap farm + agent creation in one atomic write.
@@ -42,6 +43,7 @@ export async function createFarmWithTiles(
   height = 50
 ): Promise<CreatedFarm> {
   const farm = await placeFarm(prisma, name, width, height);
+  await grantStartingInventory(prisma, farm.id);
   const debrisGrid = generateDebrisGrid(width, height);
 
   let weedCount = 0;

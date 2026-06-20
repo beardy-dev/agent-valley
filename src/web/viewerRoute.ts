@@ -19,6 +19,17 @@ const LEGEND = [
   ),
 ].join(" | ");
 
+// Icon shown per inventory item type — debris uses its tile symbol/color,
+// crops use the mature symbol/color since inventory holds seeds *and*
+// harvested produce under the same key (see src/game/inventory.ts).
+const ITEM_ICONS: Record<string, { symbol: string; color: string }> = {
+  weed: { symbol: DEBRIS_SYMBOLS.WEED, color: DEBRIS_COLORS.WEED },
+  rock: { symbol: DEBRIS_SYMBOLS.ROCK, color: DEBRIS_COLORS.ROCK },
+  ...Object.fromEntries(
+    Object.entries(CROPS).map(([name, def]) => [name, { symbol: def.matureSymbol, color: def.matureColor }])
+  ),
+};
+
 export function registerViewerRoutes(app: FastifyInstance, prisma: PrismaClient) {
   // Registered ahead of /farms/:farmId for clarity; Fastify's router already
   // prefers this static route over the parametric one regardless of order.
@@ -97,9 +108,9 @@ function renderViewerPage(farmId: string, name: string | null): string {
   #legend, #meta { color: #888; margin-bottom: 8px; }
   #board { display: flex; gap: 24px; align-items: flex-start; }
   #grid { font-size: 16px; line-height: 1.05; white-space: pre; }
-  #history-panel { width: 340px; flex-shrink: 0; }
-  #history-panel h3 { margin: 0 0 8px; font-size: 13px; color: #999; font-weight: normal; text-transform: uppercase; }
-  #history { max-height: 640px; overflow-y: auto; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 12px; }
+  #sidebar { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; }
+  #sidebar h3 { margin: 0 0 8px; font-size: 13px; color: #999; font-weight: normal; text-transform: uppercase; }
+  #history { max-height: 480px; overflow-y: auto; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 12px; }
   .history-entry { padding: 5px 0; border-bottom: 1px solid #222; }
   .history-entry:last-child { border-bottom: none; }
   .history-time { color: #666; }
@@ -107,6 +118,9 @@ function renderViewerPage(farmId: string, name: string | null): string {
   .history-fail { color: #e08a8a; }
   .history-message { color: #ccc; display: block; }
   .history-empty { color: #666; }
+  #inventory { border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+  .inventory-entry { display: flex; justify-content: space-between; padding: 3px 0; }
+  .inventory-qty { color: #ddd; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -116,9 +130,15 @@ function renderViewerPage(farmId: string, name: string | null): string {
   <div id="meta">connecting...</div>
   <div id="board">
     <pre id="grid">loading...</pre>
-    <div id="history-panel">
-      <h3>Action history (last ${HISTORY_LIMIT})</h3>
-      <div id="history"><div class="history-empty">No actions yet.</div></div>
+    <div id="sidebar">
+      <div id="history-panel">
+        <h3>Action history (last ${HISTORY_LIMIT})</h3>
+        <div id="history"><div class="history-empty">No actions yet.</div></div>
+      </div>
+      <div id="inventory-panel">
+        <h3>Inventory</h3>
+        <div id="inventory"><div class="history-empty">Empty.</div></div>
+      </div>
     </div>
   </div>
   <script>
@@ -127,6 +147,8 @@ function renderViewerPage(farmId: string, name: string | null): string {
     const meta = document.getElementById("meta");
     const grid = document.getElementById("grid");
     const history = document.getElementById("history");
+    const inventory = document.getElementById("inventory");
+    const ITEM_ICONS = ${JSON.stringify(ITEM_ICONS)};
 
     function escapeHtml(s) {
       return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -149,6 +171,20 @@ function renderViewerPage(farmId: string, name: string | null): string {
       }).join("");
     }
 
+    function renderInventory(items) {
+      if (!items || items.length === 0) {
+        inventory.innerHTML = '<div class="history-empty">Empty.</div>';
+        return;
+      }
+      inventory.innerHTML = items.map((item) => {
+        const icon = ITEM_ICONS[item.itemType] || { symbol: "?", color: "#888" };
+        return '<div class="inventory-entry">' +
+          '<span><span style="color:' + icon.color + ';">' + icon.symbol + '</span> ' + escapeHtml(item.itemType) + '</span>' +
+          '<span class="inventory-qty">' + item.quantity + '</span>' +
+          '</div>';
+      }).join("");
+    }
+
     ws.onopen = () => { meta.textContent = "connected — live"; };
     ws.onclose = () => { meta.textContent = "disconnected"; };
     ws.onerror = () => { meta.textContent = "connection error"; };
@@ -158,6 +194,7 @@ function renderViewerPage(farmId: string, name: string | null): string {
       meta.textContent = "updated " + data.updatedAt;
       grid.innerHTML = data.html;
       renderHistory(data.actions);
+      renderInventory(data.inventory);
     };
   </script>
 </body>

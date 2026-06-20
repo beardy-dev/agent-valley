@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { WebSocket } from "@fastify/websocket";
+import { getInventory } from "../game/inventory";
 import { renderFarmAscii, renderFarmHtml } from "../game/render";
 
 // farmId -> set of live human viewers currently watching that farm's dashboard.
@@ -44,9 +45,10 @@ async function renderAndSend(prisma: PrismaClient, farmId: string, sockets: Set<
   const farm = await prisma.farm.findUnique({ where: { id: farmId } });
   if (!farm) return;
 
-  const [tiles, actions] = await Promise.all([
+  const [tiles, actions, inventory] = await Promise.all([
     prisma.tile.findMany({ where: { farmId } }),
     prisma.actionLog.findMany({ where: { farmId }, orderBy: { createdAt: "desc" }, take: HISTORY_LIMIT }),
+    getInventory(prisma, farmId),
   ]);
 
   const payload = JSON.stringify({
@@ -63,6 +65,7 @@ async function renderAndSend(prisma: PrismaClient, farmId: string, sockets: Set<
       success: a.success,
       createdAt: a.createdAt.toISOString(),
     })),
+    inventory: inventory.map((item) => ({ itemType: item.itemType, quantity: item.quantity })),
     updatedAt: new Date().toISOString(),
   });
 

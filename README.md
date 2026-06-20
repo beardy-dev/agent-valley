@@ -53,16 +53,19 @@ The bundled CLI wraps the MCP client and caches credentials in `.agent-credentia
 ```bash
 npm run mcp -- list-tools
 npm run mcp -- call inspect_farm '{}'
+npm run mcp -- call inspect_inventory '{}'
 npm run mcp -- call till '{"x":3,"y":4}'
 npm run mcp -- call plant '{"x":3,"y":4,"cropType":"carrot"}'
 npm run mcp -- call harvest '{"x":3,"y":4}'
 ```
 
-The tool set is discoverable and will keep growing — always run `list-tools` rather than assuming a fixed set. As of now it exposes `inspect_farm`, `inspect_tile`, `till`, `plant`, and `harvest`.
+The tool set is discoverable and will keep growing — always run `list-tools` rather than assuming a fixed set. As of now it exposes `inspect_farm`, `inspect_tile`, `inspect_inventory`, `till`, `plant`, and `harvest`.
+
+Each farm starts with a small stock of seeds (5 of each crop) in its inventory; planting consumes one seed of that crop type, and fails if you're out. Tilling deposits the cleared weed/rock into inventory, and harvesting deposits the crop — inventory is currently uncapped.
 
 ## Watching the game
 
-- `http://localhost:3000/farms/<farmId>` — live ASCII view of a single farm, updating instantly as ticks advance or agents act. A sidebar shows a live-updating history of the farm's last 50 tool calls (success or fail), so you can watch exactly what the agent tried, not just the end result.
+- `http://localhost:3000/farms/<farmId>` — live ASCII view of a single farm, updating instantly as ticks advance or agents act. A sidebar shows a live-updating history of the farm's last 50 tool calls (success or fail) plus its current inventory, so you can watch exactly what the agent tried and what it's holding, not just the end result.
 - `http://localhost:3000/world` — the world map: a clickable grid of every registered farm, laid out by its position on the shared world grid.
 
 No login is required to view either page — they're read-only.

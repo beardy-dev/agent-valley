@@ -3,6 +3,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { Agent, Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { CROP_TYPES, isCropType, isMature } from "../game/crops";
+import { addItem, consumeItem, getInventory } from "../game/inventory";
 import { renderFarmAscii } from "../game/render";
 import { broadcast, HISTORY_LIMIT } from "../web/connections";
 
@@ -188,6 +189,19 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
   );
 
   server.registerTool(
+    "inspect_inventory",
+    {
+      description: "View your farm's inventory: seeds, harvested crops, and debris cleared from tiles (read-only).",
+      inputSchema: {},
+    },
+    withEventLog(prisma, agent.id, agent.farmId, "inspect_inventory", async () => {
+      const items = await getInventory(prisma, agent.farmId);
+      if (items.length === 0) return ok("Your inventory is empty.");
+      return ok(items.map((item) => `${item.itemType}: ${item.quantity}`).join("\n"));
+    })
+  );
+
+  server.registerTool(
     "till",
     {
       description: "Clear debris (weeds/rocks) from the tile at the given coordinate.",
@@ -207,8 +221,10 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
           if (tile.debris === "NONE") return fail("Nothing to till here — this tile is already clear.");
           if (tile.cropType) return fail("Can't till a tile with a crop planted on it.");
 
+          const itemType = tile.debris.toLowerCase();
           await tx.tile.update({ where: { id: tile.id }, data: { debris: "NONE" } });
-          return ok(`Cleared ${tile.debris.toLowerCase()} from (${tile.x}, ${tile.y}).`);
+          const quantity = await addItem(tx, agent.farmId, itemType, 1);
+          return ok(`Cleared ${itemType} from (${tile.x}, ${tile.y}). +1 ${itemType} (now have ${quantity}).`);
         });
       })
     )
@@ -231,11 +247,16 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
           if (tile.debris !== "NONE") return fail(`This tile still has ${tile.debris.toLowerCase()} on it — till it first.`);
           if (tile.cropType) return fail(`A ${tile.cropType} is already planted here.`);
 
+          const remaining = await consumeItem(tx, agent.farmId, cropType, 1);
+          if (remaining === null) return fail(`You don't have any ${cropType} seeds left.`);
+
           await tx.tile.update({
             where: { id: tile.id },
             data: { cropType, cropStage: 0, plantedAt: new Date() },
           });
-          return ok(`Planted ${cropType} at (${tile.x}, ${tile.y}). It will grow as the world ticks forward.`);
+          return ok(
+            `Planted ${cropType} at (${tile.x}, ${tile.y}). ${remaining} ${cropType} seed(s) left. It will grow as the world ticks forward.`
+          );
         });
       })
     )
@@ -260,11 +281,13 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
             return fail(`${tile.cropType} is still growing (stage ${tile.cropStage}) — check back after more ticks.`);
           }
 
+          const cropType = tile.cropType;
           await tx.tile.update({
             where: { id: tile.id },
             data: { cropType: null, cropStage: 0, plantedAt: null },
           });
-          return ok(`Harvested 1 ${tile.cropType} from (${tile.x}, ${tile.y}).`);
+          const quantity = await addItem(tx, agent.farmId, cropType, 1);
+          return ok(`Harvested 1 ${cropType} from (${tile.x}, ${tile.y}). You now have ${quantity} ${cropType} in your inventory.`);
         });
       })
     )
