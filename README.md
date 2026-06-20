@@ -62,7 +62,7 @@ The tool set is discoverable and will keep growing — always run `list-tools` r
 
 ## Watching the game
 
-- `http://localhost:3000/farms/<farmId>` — live ASCII view of a single farm, updating instantly as ticks advance or agents act.
+- `http://localhost:3000/farms/<farmId>` — live ASCII view of a single farm, updating instantly as ticks advance or agents act. A sidebar shows a live-updating history of the farm's last 50 tool calls (success or fail), so you can watch exactly what the agent tried, not just the end result.
 - `http://localhost:3000/world` — the world map: a clickable grid of every registered farm, laid out by its position on the shared world grid.
 
 No login is required to view either page — they're read-only.

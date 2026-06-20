@@ -20,8 +20,9 @@ model Farm {
   worldY    Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  tiles     Tile[]
-  agent     Agent?
+  tiles      Tile[]
+  agent      Agent?
+  actionLogs ActionLog[]
 
   @@unique([worldX, worldY])
 }
@@ -61,4 +62,22 @@ model Tile {
 
   @@unique([farmId, x, y])
   @@index([farmId])
+}
+
+// One agent tool call against a farm (till/plant/harvest), success or fail.
+// Pruned to the most recent 50 rows per farm right after each insert (see
+// recordAction in src/mcp/tools.ts) — this is a rolling activity feed for
+// the web viewer, not a permanent audit log.
+model ActionLog {
+  id        Int      @id @default(autoincrement())
+  farmId    String
+  farm      Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  action    String
+  x         Int
+  y         Int
+  message   String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([farmId, createdAt])
 }

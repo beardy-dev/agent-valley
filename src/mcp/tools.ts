@@ -4,7 +4,7 @@ import { Agent, Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { CROP_TYPES, isCropType, isMature } from "../game/crops";
 import { renderFarmAscii } from "../game/render";
-import { broadcast } from "../web/connections";
+import { broadcast, HISTORY_LIMIT } from "../web/connections";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -14,6 +14,11 @@ function ok(text: string): CallToolResult {
 
 function fail(text: string): CallToolResult {
   return { content: [{ type: "text", text }], isError: true };
+}
+
+function resultText(result: CallToolResult): string {
+  const block = result.content[0];
+  return block && block.type === "text" ? block.text : "";
 }
 
 function describeTile(x: number, y: number, tile: { terrain: string; debris: string; cropType: string | null; cropStage: number }): string {
@@ -28,17 +33,45 @@ function describeTile(x: number, y: number, tile: { terrain: string; debris: str
   return parts.join(", ");
 }
 
-// Wraps a mutating tool handler so every successful action broadcasts the
-// farm's new state to live web viewers — callers never have to remember to
-// call broadcast() themselves, so a future tool can't forget it.
-function withBroadcast<Args extends unknown[]>(
+// Records one tool attempt (success or fail) to the farm's rolling activity
+// feed, then prunes anything beyond the most recent HISTORY_LIMIT rows —
+// this is a bounded feed for the web viewer, not a permanent audit log.
+async function recordAction(
   prisma: PrismaClient,
   farmId: string,
-  handler: (...args: Args) => Promise<CallToolResult>
-): (...args: Args) => Promise<CallToolResult> {
-  return async (...args: Args) => {
-    const result = await handler(...args);
-    if (!result.isError) await broadcast(prisma, farmId);
+  action: string,
+  x: number,
+  y: number,
+  message: string,
+  success: boolean
+): Promise<void> {
+  await prisma.actionLog.create({ data: { farmId, action, x, y, message, success } });
+
+  const stale = await prisma.actionLog.findMany({
+    where: { farmId },
+    orderBy: { createdAt: "desc" },
+    skip: HISTORY_LIMIT,
+    select: { id: true },
+  });
+  if (stale.length > 0) {
+    await prisma.actionLog.deleteMany({ where: { id: { in: stale.map((row) => row.id) } } });
+  }
+}
+
+// Wraps a mutating tool handler so every attempt — success or fail — is
+// recorded to the farm's action history and broadcast to live web viewers.
+// Callers never have to remember to call recordAction()/broadcast()
+// themselves, so a future tool can't forget either.
+function withGameLog<Arg extends { x: number; y: number }>(
+  prisma: PrismaClient,
+  farmId: string,
+  action: string,
+  handler: (arg: Arg) => Promise<CallToolResult>
+): (arg: Arg) => Promise<CallToolResult> {
+  return async (arg: Arg) => {
+    const result = await handler(arg);
+    await recordAction(prisma, farmId, action, arg.x, arg.y, resultText(result), !result.isError);
+    await broadcast(prisma, farmId);
     return result;
   };
 }
@@ -104,7 +137,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       description: "Clear debris (weeds/rocks) from the tile at the given coordinate.",
       inputSchema: { x: xSchema, y: ySchema },
     },
-    withBroadcast(prisma, agent.farmId, async ({ x, y }) => {
+    withGameLog(prisma, agent.farmId, "till", async ({ x, y }) => {
       // The read and write run inside one transaction so a concurrent
       // till/plant/harvest on the same tile can't pass its precondition
       // check against a row this call is about to overwrite.
@@ -125,7 +158,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       description: "Plant a crop on the (cleared) tile at the given coordinate.",
       inputSchema: { x: xSchema, y: ySchema, cropType: z.enum(CROP_TYPES) },
     },
-    withBroadcast(prisma, agent.farmId, async ({ x, y, cropType }) => {
+    withGameLog(prisma, agent.farmId, "plant", async ({ x, y, cropType }) => {
       return prisma.$transaction(async (tx) => {
         const tile = await getTile(tx, x, y);
         if (tile.debris !== "NONE") return fail(`This tile still has ${tile.debris.toLowerCase()} on it — till it first.`);
@@ -146,7 +179,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       description: "Harvest a mature crop from the tile at the given coordinate.",
       inputSchema: { x: xSchema, y: ySchema },
     },
-    withBroadcast(prisma, agent.farmId, async ({ x, y }) => {
+    withGameLog(prisma, agent.farmId, "harvest", async ({ x, y }) => {
       return prisma.$transaction(async (tx) => {
         const tile = await getTile(tx, x, y);
         if (!tile.cropType) return fail("Nothing to harvest here.");

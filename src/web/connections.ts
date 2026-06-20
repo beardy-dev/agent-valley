@@ -19,17 +19,34 @@ export function subscribe(farmId: string, socket: WebSocket): void {
   });
 }
 
+// Single source of truth for "how much action history do we keep/show per
+// farm" — used both to cap the query here and to prune storage in
+// src/mcp/tools.ts's recordAction, and shown in the viewer page's heading.
+export const HISTORY_LIMIT = 50;
+
 async function renderAndSend(prisma: PrismaClient, farmId: string, sockets: Set<WebSocket>): Promise<void> {
   const farm = await prisma.farm.findUnique({ where: { id: farmId } });
   if (!farm) return;
 
-  const tiles = await prisma.tile.findMany({ where: { farmId } });
+  const [tiles, actions] = await Promise.all([
+    prisma.tile.findMany({ where: { farmId } }),
+    prisma.actionLog.findMany({ where: { farmId }, orderBy: { createdAt: "desc" }, take: HISTORY_LIMIT }),
+  ]);
+
   const payload = JSON.stringify({
     farmId,
     width: farm.width,
     height: farm.height,
     ascii: renderFarmAscii(tiles, farm.width, farm.height),
     html: renderFarmHtml(tiles, farm.width, farm.height),
+    actions: actions.map((a) => ({
+      action: a.action,
+      x: a.x,
+      y: a.y,
+      message: a.message,
+      success: a.success,
+      createdAt: a.createdAt.toISOString(),
+    })),
     updatedAt: new Date().toISOString(),
   });
 
