@@ -44,7 +44,7 @@ async function main() {
 
     const [toolName, jsonArgs] = rest;
     if (!toolName) {
-      console.error("call requires a tool name, e.g. call move '{\"direction\":\"up\"}'");
+      console.error("call requires a tool name, e.g. call till '{\"x\":3,\"y\":4}'");
       process.exit(1);
     }
     const args = jsonArgs ? JSON.parse(jsonArgs) : {};

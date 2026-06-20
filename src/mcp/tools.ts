@@ -8,8 +8,6 @@ import { broadcast } from "../web/connections";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const DIRECTIONS = ["up", "down", "left", "right"] as const;
-
 function ok(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };
 }
@@ -49,21 +47,21 @@ function withBroadcast<Args extends unknown[]>(
  * Builds a fresh MCP server (with all game tools registered) for a single
  * authenticated agent. Called once per HTTP request in the stateless
  * Streamable HTTP route — see src/mcp/route.ts.
+ *
+ * Agents have no on-farm position ("god mode"): every tile-level tool takes
+ * an explicit x/y coordinate rather than acting on wherever an avatar
+ * happens to be standing.
  */
 export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Promise<McpServer> {
   const farm = await prisma.farm.findUniqueOrThrow({ where: { id: agent.farmId } });
 
   const server = new McpServer({ name: "agent-valley", version: "0.1.0" });
 
-  // Re-reads the agent's current position inside the given db handle (a
-  // transaction, when called from a mutating tool) rather than trusting the
-  // farmX/farmY snapshot captured when this server was built — that snapshot
-  // can be stale if another request moved the agent in the meantime.
-  async function currentTile(db: Db) {
-    const current = await db.agent.findUniqueOrThrow({ where: { id: agent.id } });
-    return db.tile.findUniqueOrThrow({
-      where: { farmId_x_y: { farmId: agent.farmId, x: current.farmX, y: current.farmY } },
-    });
+  const xSchema = z.number().int().min(0).max(farm.width - 1).describe("Column on the farm grid (0-indexed)");
+  const ySchema = z.number().int().min(0).max(farm.height - 1).describe("Row on the farm grid (0-indexed)");
+
+  async function getTile(db: Db, x: number, y: number) {
+    return db.tile.findUniqueOrThrow({ where: { farmId_x_y: { farmId: agent.farmId, x, y } } });
   }
 
   server.registerTool(
@@ -80,10 +78,9 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       if (!targetFarm) return fail(`No farm found with id ${targetFarmId}`);
 
       const tiles = await prisma.tile.findMany({ where: { farmId: targetFarmId } });
-      const isOwnFarm = targetFarmId === agent.farmId;
-      const ascii = renderFarmAscii(tiles, targetFarm.width, targetFarm.height, isOwnFarm ? { x: agent.farmX, y: agent.farmY } : undefined);
+      const ascii = renderFarmAscii(tiles, targetFarm.width, targetFarm.height);
 
-      const legend = "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop | @ you (own farm only)";
+      const legend = "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop";
       return ok(`Farm ${targetFarm.id} (${targetFarm.width}x${targetFarm.height})\n${legend}\n\n${ascii}`);
     }
   );
@@ -91,64 +88,28 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
   server.registerTool(
     "inspect_tile",
     {
-      description: "Inspect a single tile on your own farm. Defaults to your current position.",
-      inputSchema: {
-        x: z.number().int().min(0).max(farm.width - 1).optional(),
-        y: z.number().int().min(0).max(farm.height - 1).optional(),
-      },
+      description: "Inspect a single tile on your own farm by coordinate.",
+      inputSchema: { x: xSchema, y: ySchema },
     },
     async ({ x, y }) => {
-      const tx = x ?? agent.farmX;
-      const ty = y ?? agent.farmY;
-      const tile = await prisma.tile.findUnique({ where: { farmId_x_y: { farmId: agent.farmId, x: tx, y: ty } } });
-      if (!tile) return fail(`No tile at (${tx}, ${ty})`);
-      return ok(describeTile(tx, ty, tile));
+      const tile = await prisma.tile.findUnique({ where: { farmId_x_y: { farmId: agent.farmId, x, y } } });
+      if (!tile) return fail(`No tile at (${x}, ${y})`);
+      return ok(describeTile(x, y, tile));
     }
-  );
-
-  server.registerTool(
-    "move",
-    {
-      description: "Move your avatar one tile within your own farm (clamped at the edges).",
-      inputSchema: {
-        direction: z.enum(DIRECTIONS),
-      },
-    },
-    withBroadcast(prisma, agent.farmId, async ({ direction }: { direction: (typeof DIRECTIONS)[number] }) => {
-      const delta = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[direction];
-
-      // Reading the agent's position and writing the new one happen inside
-      // one transaction so two concurrent `move` calls for the same agent
-      // can't both compute their target from the same stale position and
-      // clobber each other.
-      const { updated, tile } = await prisma.$transaction(async (tx) => {
-        const current = await tx.agent.findUniqueOrThrow({ where: { id: agent.id } });
-        const newX = Math.max(0, Math.min(farm.width - 1, current.farmX + delta[0]));
-        const newY = Math.max(0, Math.min(farm.height - 1, current.farmY + delta[1]));
-
-        const updated = await tx.agent.update({ where: { id: agent.id }, data: { farmX: newX, farmY: newY } });
-        const tile = await tx.tile.findUniqueOrThrow({
-          where: { farmId_x_y: { farmId: agent.farmId, x: updated.farmX, y: updated.farmY } },
-        });
-        return { updated, tile };
-      });
-
-      return ok(`Moved ${direction} to ${describeTile(updated.farmX, updated.farmY, tile)}`);
-    })
   );
 
   server.registerTool(
     "till",
     {
-      description: "Clear debris (weeds/rocks) from the tile under your current position.",
+      description: "Clear debris (weeds/rocks) from the tile at the given coordinate.",
+      inputSchema: { x: xSchema, y: ySchema },
     },
-    withBroadcast(prisma, agent.farmId, async () => {
-      // currentTile's read and the tile.update below run inside one
-      // transaction so a concurrent till/plant/harvest on the same tile
-      // can't pass its precondition check against a row this call is about
-      // to overwrite.
+    withBroadcast(prisma, agent.farmId, async ({ x, y }) => {
+      // The read and write run inside one transaction so a concurrent
+      // till/plant/harvest on the same tile can't pass its precondition
+      // check against a row this call is about to overwrite.
       return prisma.$transaction(async (tx) => {
-        const tile = await currentTile(tx);
+        const tile = await getTile(tx, x, y);
         if (tile.debris === "NONE") return fail("Nothing to till here — this tile is already clear.");
         if (tile.cropType) return fail("Can't till a tile with a crop planted on it.");
 
@@ -161,14 +122,12 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
   server.registerTool(
     "plant",
     {
-      description: "Plant a crop on the (cleared) tile under your current position.",
-      inputSchema: {
-        cropType: z.enum(CROP_TYPES),
-      },
+      description: "Plant a crop on the (cleared) tile at the given coordinate.",
+      inputSchema: { x: xSchema, y: ySchema, cropType: z.enum(CROP_TYPES) },
     },
-    withBroadcast(prisma, agent.farmId, async ({ cropType }) => {
+    withBroadcast(prisma, agent.farmId, async ({ x, y, cropType }) => {
       return prisma.$transaction(async (tx) => {
-        const tile = await currentTile(tx);
+        const tile = await getTile(tx, x, y);
         if (tile.debris !== "NONE") return fail(`This tile still has ${tile.debris.toLowerCase()} on it — till it first.`);
         if (tile.cropType) return fail(`A ${tile.cropType} is already planted here.`);
 
@@ -184,11 +143,12 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
   server.registerTool(
     "harvest",
     {
-      description: "Harvest a mature crop from the tile under your current position.",
+      description: "Harvest a mature crop from the tile at the given coordinate.",
+      inputSchema: { x: xSchema, y: ySchema },
     },
-    withBroadcast(prisma, agent.farmId, async () => {
+    withBroadcast(prisma, agent.farmId, async ({ x, y }) => {
       return prisma.$transaction(async (tx) => {
-        const tile = await currentTile(tx);
+        const tile = await getTile(tx, x, y);
         if (!tile.cropType) return fail("Nothing to harvest here.");
         if (!isCropType(tile.cropType) || !isMature(tile.cropType, tile.cropStage)) {
           return fail(`${tile.cropType} is still growing (stage ${tile.cropStage}) — check back after more ticks.`);

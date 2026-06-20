@@ -23,12 +23,8 @@ async function renderAndSend(prisma: PrismaClient, farmId: string, sockets: Set<
   const farm = await prisma.farm.findUnique({ where: { id: farmId } });
   if (!farm) return;
 
-  const [tiles, agent] = await Promise.all([
-    prisma.tile.findMany({ where: { farmId } }),
-    prisma.agent.findUnique({ where: { farmId } }),
-  ]);
-
-  const ascii = renderFarmAscii(tiles, farm.width, farm.height, agent ? { x: agent.farmX, y: agent.farmY } : undefined);
+  const tiles = await prisma.tile.findMany({ where: { farmId } });
+  const ascii = renderFarmAscii(tiles, farm.width, farm.height);
   const payload = JSON.stringify({
     farmId,
     width: farm.width,

@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { PrismaClient } from "@prisma/client";
 import { broadcast, subscribe } from "./connections";
 
-const LEGEND = "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop | @ agent";
+const LEGEND = "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop";
 
 export function registerViewerRoutes(app: FastifyInstance, prisma: PrismaClient) {
   app.get("/farms/:farmId", async (request, reply) => {

@@ -28,16 +28,15 @@ model Farm {
 
 // A registered agent. Authenticates to the MCP tools using its id plus the
 // plaintext apiSecret handed back once at registration time — only a salted
-// hash of that secret is ever stored. farmX/farmY is the agent's current
-// position (its "avatar") within its own farm grid, used by movement tools.
+// hash of that secret is ever stored. There is no on-farm position: the
+// agent has "god mode" visibility over its whole farm and acts on tiles by
+// explicit (x, y) coordinate rather than moving an avatar around.
 model Agent {
   id            String   @id @default(uuid())
   name          String?
   apiSecretHash String
   farmId        String   @unique
   farm          Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
-  farmX         Int      @default(0)
-  farmY         Int      @default(0)
   createdAt     DateTime @default(now())
 }
 

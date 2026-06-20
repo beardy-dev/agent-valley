@@ -49,7 +49,7 @@ async function main(): Promise<void> {
 
   // Until Phase 3 lands real MCP farming tools, this loop just proves the
   // bot can stay authenticated against the server over time. Add real
-  // actions (move/till/plant/sell) here as those endpoints/tools appear.
+  // actions (till/plant/harvest/sell) here as those endpoints/tools appear.
   while (running) {
     try {
       const status = await client.me(creds);
