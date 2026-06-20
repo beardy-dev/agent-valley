@@ -24,7 +24,7 @@ Agent Valley is a cozy farming simulator for AI Agents. Agents can grow manage t
 5. **Phase 5: TUI Application** - Terminal-based visualizer replicating the web view.
 
 ## Current Objective
-- Focus entirely on **Phase 3**. Expose the core MCP tools agents use to play: movement within their own farm, read-only inspection (own + other farms), and farming actions (till, plant, harvest). Crops grow via periodic server-side ticks.
+- Focus entirely on **Phase 4**. Build the web visualizer: a WebSocket-driven live ASCII dashboard for any farm, addressable by Farm UUID, viewable by humans (no agent auth required — read-only). It should re-render whenever the farm's state changes (server tick advances crop growth, or an agent acts via MCP tools).
 
 ## MCP Server (Phase 3)
 - Mounted on the same Fastify app as the REST API, at `POST /mcp` (stateless Streamable HTTP transport — one `McpServer` instance per request, no sessions). `GET`/`DELETE /mcp` return 405.
@@ -32,3 +32,10 @@ Agent Valley is a cozy farming simulator for AI Agents. Agents can grow manage t
 - Tools (see `src/mcp/tools.ts`): `inspect_farm`, `inspect_tile`, `move`, `till`, `plant`, `harvest`. The tool set will keep growing across phases — always discover via `tools/list` rather than hardcoding assumptions about what exists.
 - Crops (`src/game/crops.ts`): `carrot`, `potato`, each with a `matureStage`; `harvest` only succeeds once a planted crop's `cropStage` reaches that. Growth happens in `src/game/tick.ts`, run on an interval in `src/index.ts` (`TICK_INTERVAL_MS`, default 20s).
 - No inventory/wallet/marketplace yet — `harvest` just clears the tile and reports what was picked. That's a later phase.
+
+## Web Visualizer (Phase 4)
+- `GET /farms/:farmId` serves a small standalone HTML page (no build step, inline `<script>`) that opens a WebSocket and renders the farm's ASCII grid in a `<pre>`. No auth — read-only, public by Farm UUID, same legend as the MCP `inspect_farm` tool.
+- `GET /farms/:farmId/ws` is the WebSocket endpoint (`src/web/viewerRoute.ts`, via `@fastify/websocket`). Sends a full re-render (`{ farmId, width, height, ascii, updatedAt }`) on connect and again whenever the farm's state changes — no diffing, the whole grid is cheap enough to resend.
+- `src/web/connections.ts` tracks live viewers per `farmId` in memory and exposes `broadcast(prisma, farmId)` (push to one farm's viewers) and `broadcastAll(prisma)` (push to every farm with at least one viewer). Both are no-ops if nobody's watching.
+- Two triggers call these: the tick loop in `src/index.ts` calls `broadcastAll` after every `advanceTick`, and each mutating MCP tool (`move`, `till`, `plant`, `harvest` in `src/mcp/tools.ts`) calls `broadcast` for its own farm right after the DB write, so the dashboard reacts instantly to agent actions rather than waiting for the next tick.
+- Gotcha worth remembering: a `{ websocket: true }` route only gets upgraded correctly if it's registered inside a nested `app.register(async (instance) => { ... })` scope — registering it directly on the root Fastify instance silently falls back to a normal HTTP handler (the client sees "Unexpected server response: 200" instead of a 101 upgrade). `registerViewerRoutes` wraps the `/ws` route this way; keep that pattern for any future websocket routes.

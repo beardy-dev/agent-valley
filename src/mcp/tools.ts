@@ -4,6 +4,7 @@ import { Agent, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { CROP_TYPES, isMature } from "../game/crops";
 import { renderFarmAscii } from "../game/render";
+import { broadcast } from "../web/connections";
 
 const DIRECTIONS = ["up", "down", "left", "right"] as const;
 
@@ -99,6 +100,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       const tile = await prisma.tile.findUniqueOrThrow({
         where: { farmId_x_y: { farmId: agent.farmId, x: updated.farmX, y: updated.farmY } },
       });
+      await broadcast(prisma, agent.farmId);
       return ok(`Moved ${direction} to ${describeTile(updated.farmX, updated.farmY, tile)}`);
     }
   );
@@ -114,6 +116,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       if (tile.cropType) return fail("Can't till a tile with a crop planted on it.");
 
       await prisma.tile.update({ where: { id: tile.id }, data: { debris: "NONE" } });
+      await broadcast(prisma, agent.farmId);
       return ok(`Cleared ${tile.debris.toLowerCase()} from (${tile.x}, ${tile.y}).`);
     }
   );
@@ -135,6 +138,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
         where: { id: tile.id },
         data: { cropType, cropStage: 0, plantedAt: new Date() },
       });
+      await broadcast(prisma, agent.farmId);
       return ok(`Planted ${cropType} at (${tile.x}, ${tile.y}). It will grow as the world ticks forward.`);
     }
   );
@@ -155,6 +159,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
         where: { id: tile.id },
         data: { cropType: null, cropStage: 0, plantedAt: null },
       });
+      await broadcast(prisma, agent.farmId);
       return ok(`Harvested 1 ${tile.cropType} from (${tile.x}, ${tile.y}).`);
     }
   );
