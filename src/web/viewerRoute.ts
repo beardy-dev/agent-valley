@@ -19,6 +19,19 @@ const LEGEND = [
 ].join(" | ");
 
 export function registerViewerRoutes(app: FastifyInstance, prisma: PrismaClient) {
+  // Registered ahead of /farms/:farmId for clarity; Fastify's router already
+  // prefers this static route over the parametric one regardless of order.
+  app.get("/farms/random", async (_request, reply) => {
+    const count = await prisma.farm.count();
+    if (count === 0) {
+      reply.code(404);
+      return { error: "No farms registered yet." };
+    }
+
+    const [farm] = await prisma.farm.findMany({ take: 1, skip: Math.floor(Math.random() * count), orderBy: { createdAt: "asc" } });
+    return reply.redirect(`/farms/${farm.id}`);
+  });
+
   app.get("/farms/:farmId", async (request, reply) => {
     const { farmId } = request.params as { farmId: string };
     const farm = await prisma.farm.findUnique({ where: { id: farmId } });

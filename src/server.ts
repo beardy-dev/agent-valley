@@ -5,14 +5,14 @@ import { registerAgentRoutes } from "./routes/agents";
 import { registerMcpRoute } from "./mcp/route";
 import { registerViewerRoutes } from "./web/viewerRoute";
 import { registerWorldRoutes } from "./web/worldRoute";
+import { registerHomeRoutes } from "./web/homeRoute";
 
 export function buildServer() {
   const app = Fastify({ logger: true });
 
   app.register(websocketPlugin);
 
-  app.get("/", async () => ({ status: "ok", game: "Agent Valley" }));
-
+  registerHomeRoutes(app, prisma);
   registerAgentRoutes(app, prisma);
   registerMcpRoute(app, prisma);
   registerViewerRoutes(app, prisma);
