@@ -45,22 +45,42 @@ model Agent {
 
 // One cell of a Farm's grid. Terrain, debris, and crop are separate layers
 // on the same coordinate. A tile only ever has debris OR a crop, never both
-// — planting requires debris to be cleared first.
+// — planting requires debris to be cleared first. Trees are a third,
+// mutually-exclusive "growing thing" alongside crop/debris (see
+// src/game/trees.ts): treeType is set only on a tree's own center tile,
+// fruitType only on one of its 8 surrounding footprint tiles, and
+// blockedByTree on all 8 footprint tiles permanently (renders "#" there
+// whenever fruitType/debris aren't overriding it). cropStage is reused for
+// whichever of cropType/treeType/fruitType is actually set on a given
+// tile, since exactly one of them is ever non-null at a time.
 model Tile {
-  id        Int       @id @default(autoincrement())
-  farmId    String
-  farm      Farm      @relation(fields: [farmId], references: [id], onDelete: Cascade)
-  x         Int
-  y         Int
+  id            Int       @id @default(autoincrement())
+  farmId        String
+  farm          Farm      @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  x             Int
+  y             Int
   // TerrainType: "DIRT" (SQLite has no native enum support).
-  terrain   String    @default("DIRT")
-  // DebrisType: "NONE" | "WEED" | "ROCK" (SQLite has no native enum support).
-  debris    String    @default("NONE")
+  terrain       String    @default("DIRT")
+  // DebrisType: "NONE" | "WEED" | "ROCK" | "WILTED" (SQLite has no native enum support).
+  debris        String    @default("NONE")
   // CropType key from src/game/crops.ts (e.g. "carrot"), or null if unplanted.
-  cropType  String?
-  cropStage Int       @default(0)
-  plantedAt DateTime?
-  updatedAt DateTime  @updatedAt
+  cropType      String?
+  cropStage     Int       @default(0)
+  plantedAt     DateTime?
+  // TreeType key from src/game/trees.ts — set only on a tree's center tile.
+  treeType      String?
+  // TreeType key — a tree's fruit is the same species as the tree itself.
+  // Set only on one of a tree's 8 footprint tiles while a fruit is ripening/ripe.
+  fruitType     String?
+  // True on all 8 footprint tiles of a planted tree, forever (trees are
+  // permanent) — renders "#" and blocks till/plant whenever fruitType and
+  // debris=="WILTED" aren't overriding it.
+  blockedByTree Boolean   @default(false)
+  // Back-reference to the owning tree's center tile (set on the center
+  // tile too, pointing at itself, for symmetry).
+  treeCenterX   Int?
+  treeCenterY   Int?
+  updatedAt     DateTime  @updatedAt
 
   @@unique([farmId, x, y])
   @@index([farmId])

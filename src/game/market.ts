@@ -1,4 +1,5 @@
 import { CROP_TYPES, CROPS, CropType } from "./crops";
+import { isTreeType, TREE_TYPES, TREES } from "./trees";
 
 // The general/auto store's currency. Just another InventoryItem key (see
 // src/game/inventory.ts) rather than a dedicated column — reuses
@@ -16,11 +17,14 @@ const DEBRIS_SELL_PRICES: Record<DebrisItemType, number> = {
   rock: 2,
 };
 
-export const SELLABLE_ITEM_TYPES = [...CROP_TYPES, ...DEBRIS_ITEM_TYPES] as [string, ...string[]];
+// Tree fruit is sellable; saplings are not (same rule as seeds — neither
+// "seed_x" nor "sapling_x" ever appears here).
+export const SELLABLE_ITEM_TYPES = [...CROP_TYPES, ...DEBRIS_ITEM_TYPES, ...TREE_TYPES] as [string, ...string[]];
 
 export function getSellPrice(itemType: string): number | undefined {
   if (itemType in CROPS) return CROPS[itemType as CropType].sellPrice;
   if (itemType in DEBRIS_SELL_PRICES) return DEBRIS_SELL_PRICES[itemType as DebrisItemType];
+  if (isTreeType(itemType)) return TREES[itemType].fruitSellPrice;
   return undefined;
 }
 

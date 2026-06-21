@@ -1,13 +1,15 @@
 import { Tile } from "@prisma/client";
 import { cropColor, cropSymbol, isCropType } from "./crops";
+import { isTreeType, treeColor, treeSymbol, TREES } from "./trees";
 
 export const DEBRIS_SYMBOLS: Record<string, string> = {
   NONE: ".",
   WEED: "W",
   ROCK: "R",
-  // A mature crop left unharvested too long (see WILT_TICKS in
-  // src/game/crops.ts) dies and leaves this behind, same as any other
-  // debris — must be tilled before the tile can be replanted.
+  // A mature crop (or dropped fruit, see trees.ts) left unharvested too
+  // long dies and leaves this behind, same as any other debris — must be
+  // tilled before the tile can be replanted (or, for a tree's footprint,
+  // before it goes back to rendering BLOCKED_SYMBOL).
   WILTED: "☠",
 };
 
@@ -18,13 +20,32 @@ export const DEBRIS_COLORS: Record<string, string> = {
   WILTED: "#8b3a3a",
 };
 
-function tileSymbol(tile: Pick<Tile, "debris" | "cropType" | "cropStage">): string {
+// One of a tree's 8 permanently-reserved footprint tiles, currently empty
+// (no fruit ripening/dead on it) — see blockedByTree in schema.prisma.
+export const BLOCKED_SYMBOL = "#";
+export const BLOCKED_COLOR = "#4a4a4a";
+
+type TileLike = Pick<Tile, "debris" | "cropType" | "cropStage" | "treeType" | "fruitType" | "blockedByTree">;
+
+// Priority order matters: a tree's own tile always shows the tree; a
+// footprint tile shows its fruit (ripe or, once WILTED, the same dead-skull
+// every other expired plant gets) ahead of the "just blocked, nothing here"
+// fallback.
+function tileSymbol(tile: TileLike): string {
+  if (tile.treeType && isTreeType(tile.treeType)) return treeSymbol(tile.treeType, tile.cropStage);
+  if (tile.fruitType && isTreeType(tile.fruitType) && tile.debris !== "WILTED") return TREES[tile.fruitType].fruitSymbol;
+  if (tile.debris === "WILTED") return DEBRIS_SYMBOLS.WILTED;
   if (tile.cropType && isCropType(tile.cropType)) return cropSymbol(tile.cropType, tile.cropStage);
+  if (tile.blockedByTree) return BLOCKED_SYMBOL;
   return DEBRIS_SYMBOLS[tile.debris] ?? ".";
 }
 
-function tileColor(tile: Pick<Tile, "debris" | "cropType" | "cropStage">): string {
+function tileColor(tile: TileLike): string {
+  if (tile.treeType && isTreeType(tile.treeType)) return treeColor(tile.treeType, tile.cropStage);
+  if (tile.fruitType && isTreeType(tile.fruitType) && tile.debris !== "WILTED") return TREES[tile.fruitType].fruitColor;
+  if (tile.debris === "WILTED") return DEBRIS_COLORS.WILTED;
   if (tile.cropType && isCropType(tile.cropType)) return cropColor(tile.cropType, tile.cropStage);
+  if (tile.blockedByTree) return BLOCKED_COLOR;
   return DEBRIS_COLORS[tile.debris] ?? DEBRIS_COLORS.NONE;
 }
 

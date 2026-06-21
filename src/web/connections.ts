@@ -64,7 +64,7 @@ export function subscribeMarket(socket: WebSocket): boolean {
   return true;
 }
 
-export type MarketAction = "sell" | "buy_seeds";
+export type MarketAction = "sell" | "buy_seeds" | "buy_sapling";
 
 // Pushes one completed trade to every live /market viewer. No-op if nobody
 // is watching, same as broadcast() below — avoids the farm-name lookup

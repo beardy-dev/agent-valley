@@ -3,15 +3,27 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { Agent, Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { CROP_TYPES, CROPS, isCropType, isMature } from "../game/crops";
-import { addItem, consumeItem, getInventory, getItemQuantity, isSeedItemType, SEED_PREFIX, seedItemType } from "../game/inventory";
+import {
+  addItem,
+  consumeItem,
+  getInventory,
+  getItemQuantity,
+  isSaplingItemType,
+  isSeedItemType,
+  SAPLING_PREFIX,
+  saplingItemType,
+  SEED_PREFIX,
+  seedItemType,
+} from "../game/inventory";
 import { GOLD_ITEM_TYPE, SELLABLE_ITEM_TYPES, getSellPrice, getTodaysSeedOffer } from "../game/market";
 import { renderFarmAscii } from "../game/render";
+import { isTreeMature, isTreeType, treeFootprint, TREE_TYPES, TREES } from "../game/trees";
 import { broadcast, broadcastMarketEvent, HISTORY_LIMIT, MarketAction } from "../web/connections";
 
 // Actions that represent a trade with the general store rather than a tile
 // edit — withGameLog uses this to also push successful ones to the global
 // /market live feed.
-const MARKET_ACTIONS: ReadonlySet<string> = new Set<MarketAction>(["sell", "buy_seeds"]);
+const MARKET_ACTIONS: ReadonlySet<string> = new Set<MarketAction>(["sell", "buy_seeds", "buy_sapling"]);
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -28,15 +40,42 @@ function resultText(result: CallToolResult): string {
   return block && block.type === "text" ? block.text : "";
 }
 
-function describeTile(x: number, y: number, tile: { terrain: string; debris: string; cropType: string | null; cropStage: number }): string {
+function describeTile(
+  x: number,
+  y: number,
+  tile: {
+    terrain: string;
+    debris: string;
+    cropType: string | null;
+    cropStage: number;
+    treeType: string | null;
+    fruitType: string | null;
+    blockedByTree: boolean;
+    treeCenterX: number | null;
+    treeCenterY: number | null;
+  }
+): string {
   const parts = [`(${x}, ${y})`, `terrain=${tile.terrain}`, `debris=${tile.debris}`];
-  if (tile.cropType && isCropType(tile.cropType)) {
+
+  if (tile.treeType && isTreeType(tile.treeType)) {
+    parts.push(`tree=${tile.treeType}`, `stage=${tile.cropStage}`, `mature=${isTreeMature(tile.treeType, tile.cropStage)}`);
+  } else if (tile.cropType && isCropType(tile.cropType)) {
     parts.push(`crop=${tile.cropType}`, `stage=${tile.cropStage}`, `mature=${isMature(tile.cropType, tile.cropStage)}`);
   } else if (tile.cropType) {
     parts.push(`crop=${tile.cropType}`, "mature=unknown");
   } else {
     parts.push("crop=none");
   }
+
+  if (tile.fruitType && isTreeType(tile.fruitType)) {
+    parts.push(`fruit=${tile.fruitType}`, `fruitAge=${tile.cropStage}`);
+  }
+
+  if (tile.blockedByTree) {
+    const center = tile.treeCenterX !== null && tile.treeCenterY !== null ? ` (tree at ${tile.treeCenterX}, ${tile.treeCenterY})` : "";
+    parts.push(`blocked=true${center}`);
+  }
+
   return parts.join(", ");
 }
 
@@ -182,7 +221,10 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       const tiles = await prisma.tile.findMany({ where: { farmId: targetFarmId } });
       const ascii = renderFarmAscii(tiles, targetFarm.width, targetFarm.height);
 
-      const legend = "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop";
+      const legend =
+        "Legend: . dirt | W weed | R rock | lowercase growing crop | UPPERCASE mature crop | " +
+        "trees (sapling/mature): a/A apple, o/O orange, b/B banana | fruit: @ apple, * orange, % banana | " +
+        "# blocked by a tree's canopy";
       return ok(`Farm ${targetFarm.id} (${targetFarm.width}x${targetFarm.height})\n${legend}\n\n${ascii}`);
     })
   );
@@ -211,11 +253,19 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       if (items.length === 0) return ok("Your inventory is empty.");
 
       const gold = items.find((item) => item.itemType === GOLD_ITEM_TYPE);
-      const seeds = items.filter((item) => isSeedItemType(item.itemType));
-      const harvested = items.filter((item) => isCropType(item.itemType));
-      const misc = items.filter((item) => item !== gold && !isSeedItemType(item.itemType) && !isCropType(item.itemType));
+      const seeds = items.filter((item) => isSeedItemType(item.itemType) || isSaplingItemType(item.itemType));
+      const harvested = items.filter((item) => isCropType(item.itemType) || isTreeType(item.itemType));
+      const misc = items.filter(
+        (item) =>
+          item !== gold &&
+          !isSeedItemType(item.itemType) &&
+          !isSaplingItemType(item.itemType) &&
+          !isCropType(item.itemType) &&
+          !isTreeType(item.itemType)
+      );
 
-      const seedLabel = (itemType: string) => `${itemType.slice(SEED_PREFIX.length)} seeds`;
+      const seedLabel = (itemType: string) =>
+        isSaplingItemType(itemType) ? `${itemType.slice(SAPLING_PREFIX.length)} sapling` : `${itemType.slice(SEED_PREFIX.length)} seeds`;
       const section = (label: string, rows: typeof items, itemLabel: (itemType: string) => string = (t) => t) =>
         `${label}:\n` + (rows.length === 0 ? "  none" : rows.map((row) => `  ${itemLabel(row.itemType)}: ${row.quantity}`).join("\n"));
 
@@ -234,7 +284,8 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
     "inspect_market",
     {
       description:
-        "View the general store: today's crop seeds for sale (rotates daily), sell prices for crops/debris, and your gold (read-only).",
+        "View the general store: today's crop seeds for sale (rotates daily), tree saplings (always available), " +
+        "sell prices for crops/fruit/debris, and your gold (read-only).",
       inputSchema: {},
     },
     withEventLog(prisma, agent.id, agent.farmId, "inspect_market", async () => {
@@ -242,10 +293,12 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       const gold = await getItemQuantity(prisma, agent.farmId, GOLD_ITEM_TYPE);
 
       const seedLines = offer.map((cropType) => `  ${cropType}: ${CROPS[cropType].seedCost} gold/seed`).join("\n");
+      const saplingLines = TREE_TYPES.map((treeType) => `  ${treeType}: ${TREES[treeType].saplingCost} gold/sapling`).join("\n");
       const sellLines = SELLABLE_ITEM_TYPES.map((itemType) => `  ${itemType}: ${getSellPrice(itemType)} gold each`).join("\n");
 
       return ok(
         `Today's seeds for sale (rotates daily):\n${seedLines}\n\n` +
+          `Saplings for sale (always available):\n${saplingLines}\n\n` +
           `Sell prices (use the "sell" tool):\n${sellLines}\n\n` +
           `Your gold: ${gold}`
       );
@@ -269,6 +322,9 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
         // check against a row this call is about to overwrite.
         return prisma.$transaction(async (tx) => {
           const tile = await getTile(tx, x, y);
+          if (tile.blockedByTree && tile.debris === "NONE" && !tile.fruitType) {
+            return fail("This tile is shaded by a tree's canopy — nothing to till.");
+          }
           if (tile.debris === "NONE") return fail("Nothing to till here — this tile is already clear.");
           if (tile.cropType) return fail("Can't till a tile with a crop planted on it.");
 
@@ -295,6 +351,8 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       withGameLog(prisma, agent.farmId, "plant", async ({ x, y, cropType }) => {
         return prisma.$transaction(async (tx) => {
           const tile = await getTile(tx, x, y);
+          if (tile.blockedByTree) return fail("This tile is shaded by a tree's canopy and can't be planted.");
+          if (tile.treeType) return fail("A tree is already planted here.");
           if (tile.debris !== "NONE") return fail(`This tile still has ${tile.debris.toLowerCase()} on it — till it first.`);
           if (tile.cropType) return fail(`A ${tile.cropType} is already planted here.`);
 
@@ -307,6 +365,75 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
           });
           return ok(
             `Planted ${cropType} at (${tile.x}, ${tile.y}). ${remaining} ${cropType} seed(s) left. It will grow as the world ticks forward.`
+          );
+        });
+      })
+    )
+  );
+
+  server.registerTool(
+    "plant_tree",
+    {
+      description:
+        "Plant a tree at the given coordinate (its center). Trees take up a 3x3 area — the 8 surrounding " +
+        "tiles become permanently blocked. Once mature, the tree periodically drops a single fruit onto one " +
+        "of those tiles, which must be harvested before it wilts.",
+      inputSchema: { x: xSchema, y: ySchema, treeType: z.enum(TREE_TYPES) },
+    },
+    withEventLog(
+      prisma,
+      agent.id,
+      agent.farmId,
+      "plant_tree",
+      withGameLog(prisma, agent.farmId, "plant_tree", async ({ x, y, treeType }) => {
+        if (x - 1 < 0 || x + 1 >= farm.width || y - 1 < 0 || y + 1 >= farm.height) {
+          return fail("Trees need 3x3 clear space — can't plant within 1 tile of the farm edge.");
+        }
+
+        // Read center + all 8 neighbors in one query, then claim all 9 in
+        // the same transaction — SQLite's single-writer model means this is
+        // safe against a concurrent plant_tree/till/plant on any of these
+        // tiles without any extra locking.
+        return prisma.$transaction(async (tx) => {
+          const footprint = treeFootprint(x, y);
+          const coords = [{ x, y }, ...footprint];
+          const tiles = await tx.tile.findMany({ where: { farmId: agent.farmId, OR: coords } });
+          const at = (tx_: number, ty: number) => tiles.find((t) => t.x === tx_ && t.y === ty);
+
+          const center = at(x, y);
+          if (!center) return fail(`No tile at (${x}, ${y})`);
+          if (center.blockedByTree) return fail(`(${x}, ${y}) is shaded by another tree's canopy.`);
+          if (center.treeType) return fail(`A tree is already planted at (${x}, ${y}).`);
+          if (center.debris !== "NONE") return fail(`(${x}, ${y}) still has ${center.debris.toLowerCase()} on it — till it first.`);
+          if (center.cropType) return fail(`A ${center.cropType} is already planted at (${x}, ${y}).`);
+
+          for (const { x: nx, y: ny } of footprint) {
+            const neighbor = at(nx, ny);
+            if (!neighbor) return fail(`No tile at (${nx}, ${ny})`);
+            if (neighbor.blockedByTree) return fail(`(${nx}, ${ny}) is already shaded by another tree's canopy.`);
+            if (neighbor.treeType) return fail(`(${nx}, ${ny}) is another tree's center.`);
+            if (neighbor.debris !== "NONE") return fail(`(${nx}, ${ny}) still has ${neighbor.debris.toLowerCase()} on it — till it first.`);
+            if (neighbor.cropType) return fail(`(${nx}, ${ny}) already has a ${neighbor.cropType} planted.`);
+          }
+
+          const remaining = await consumeItem(tx, agent.farmId, saplingItemType(treeType), 1);
+          if (remaining === null) return fail(`You don't have any ${treeType} saplings left.`);
+
+          await tx.tile.update({
+            where: { id: center.id },
+            data: { treeType, cropStage: 0, treeCenterX: x, treeCenterY: y },
+          });
+          for (const { x: nx, y: ny } of footprint) {
+            const neighbor = at(nx, ny)!;
+            await tx.tile.update({
+              where: { id: neighbor.id },
+              data: { blockedByTree: true, treeCenterX: x, treeCenterY: y },
+            });
+          }
+
+          return ok(
+            `Planted ${treeType} tree at (${x}, ${y}). ${remaining} ${treeType} sapling(s) left. ` +
+              "The 8 surrounding tiles are now blocked — it will grow as the world ticks forward."
           );
         });
       })
@@ -327,6 +454,19 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       withGameLog(prisma, agent.farmId, "harvest", async ({ x, y }) => {
         return prisma.$transaction(async (tx) => {
           const tile = await getTile(tx, x, y);
+
+          if (tile.fruitType && isTreeType(tile.fruitType)) {
+            if (tile.debris === "WILTED") {
+              return fail(`The fruit here wilted and died before it could be harvested — till (${x}, ${y}) to clear it.`);
+            }
+            const fruitType = tile.fruitType;
+            await tx.tile.update({ where: { id: tile.id }, data: { fruitType: null, cropStage: 0 } });
+            const quantity = await addItem(tx, agent.farmId, fruitType, 1);
+            return ok(`Harvested 1 ${fruitType} from (${tile.x}, ${tile.y}). You now have ${quantity} ${fruitType} in your inventory.`);
+          }
+
+          if (tile.treeType) return fail("Trees can't be harvested directly — wait for them to drop fruit.");
+
           if (!tile.cropType) {
             if (tile.debris === "WILTED") {
               return fail(`The crop here wilted and died before it could be harvested — till (${x}, ${y}) to clear it.`);
@@ -408,6 +548,37 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
 
           const seeds = await addItem(tx, agent.farmId, seedItemType(cropType), quantity);
           return ok(`Bought ${quantity} ${cropType} seed(s) for ${cost} gold. ${remainingGold} gold left, ${seeds} ${cropType} seed(s) total.`);
+        });
+      })
+    )
+  );
+
+  server.registerTool(
+    "buy_sapling",
+    {
+      description: "Buy tree saplings, spending gold. Unlike seeds, saplings are always available — not gated by the daily rotation.",
+      inputSchema: {
+        treeType: z.enum(TREE_TYPES),
+        quantity: z.number().int().min(1).max(1000).default(1),
+      },
+    },
+    withEventLog(
+      prisma,
+      agent.id,
+      agent.farmId,
+      "buy_sapling",
+      withGameLog(prisma, agent.farmId, "buy_sapling", async ({ treeType, quantity }) => {
+        const cost = TREES[treeType].saplingCost * quantity;
+        return prisma.$transaction(async (tx) => {
+          const remainingGold = await consumeItem(tx, agent.farmId, GOLD_ITEM_TYPE, cost);
+          if (remainingGold === null) {
+            return fail(`You need ${cost} gold to buy ${quantity} ${treeType} sapling(s) but don't have enough.`);
+          }
+
+          const saplings = await addItem(tx, agent.farmId, saplingItemType(treeType), quantity);
+          return ok(
+            `Bought ${quantity} ${treeType} sapling(s) for ${cost} gold. ${remainingGold} gold left, ${saplings} ${treeType} sapling(s) total.`
+          );
         });
       })
     )

@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { CROP_TYPES, CropType, STARTER_CROPS } from "./crops";
 import { DEBRIS_ITEM_TYPES, GOLD_ITEM_TYPE } from "./market";
+import { TREE_TYPES, TreeType } from "./trees";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -29,6 +30,20 @@ export function isSeedItemType(itemType: string): boolean {
   return itemType.startsWith(SEED_PREFIX);
 }
 
+// Saplings get their own prefix rather than reusing SEED_PREFIX — a sapling
+// is a one-time purchase per tree, not a per-planting consumable in the
+// same economic bucket as seeds, and keeping the prefix distinct keeps
+// that legible wherever inventory is displayed.
+export const SAPLING_PREFIX = "sapling_";
+
+export function saplingItemType(treeType: TreeType): string {
+  return `${SAPLING_PREFIX}${treeType}`;
+}
+
+export function isSaplingItemType(itemType: string): boolean {
+  return itemType.startsWith(SAPLING_PREFIX);
+}
+
 export async function grantStartingInventory(db: Db, farmId: string): Promise<void> {
   await db.inventoryItem.createMany({
     data: [
@@ -44,6 +59,12 @@ export async function grantStartingInventory(db: Db, farmId: string): Promise<vo
         },
         // Harvested produce always starts at 0 — nothing's been grown yet.
         { farmId, itemType: cropType, quantity: 0 },
+      ]),
+      // Trees are never starter items (same as non-starter crops) — every
+      // farm starts with 0 saplings and 0 harvested fruit of each species.
+      ...TREE_TYPES.flatMap((treeType) => [
+        { farmId, itemType: saplingItemType(treeType), quantity: 0 },
+        { farmId, itemType: treeType, quantity: 0 },
       ]),
       ...DEBRIS_ITEM_TYPES.map((itemType) => ({ farmId, itemType, quantity: 0 })),
       // Deliberately not in DEBRIS_ITEM_TYPES (so it stays out of

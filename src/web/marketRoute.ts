@@ -4,12 +4,17 @@ import { MARKET_FEED_LIMIT, subscribeMarket } from "./connections";
 import { CROPS, isCropType } from "../game/crops";
 import { DEBRIS_COLORS, DEBRIS_SYMBOLS } from "../game/render";
 import { SELLABLE_ITEM_TYPES, getSellPrice, getTodaysSeedOffer } from "../game/market";
+import { isTreeType, TREE_TYPES, TREES } from "../game/trees";
 import { swatch } from "./html";
 
 function sellIcon(itemType: string): { symbol: string; color: string } {
   if (isCropType(itemType)) {
     const def = CROPS[itemType];
     return { symbol: def.matureSymbol, color: def.matureColor };
+  }
+  if (isTreeType(itemType)) {
+    const def = TREES[itemType];
+    return { symbol: def.fruitSymbol, color: def.fruitColor };
   }
   if (itemType === "weed") return { symbol: DEBRIS_SYMBOLS.WEED, color: DEBRIS_COLORS.WEED };
   if (itemType === "rock") return { symbol: DEBRIS_SYMBOLS.ROCK, color: DEBRIS_COLORS.ROCK };
@@ -38,7 +43,7 @@ export function registerMarketRoutes(app: FastifyInstance, prisma: PrismaClient)
       // farm's older trades may have already aged out — acceptable for a
       // "recent activity" backlog rather than a complete audit trail.
       const recent = await prisma.actionLog.findMany({
-        where: { action: { in: ["sell", "buy_seeds"] }, success: true },
+        where: { action: { in: ["sell", "buy_seeds", "buy_sapling"] }, success: true },
         include: { farm: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
         take: MARKET_FEED_LIMIT,
@@ -76,6 +81,16 @@ function renderMarketPage(): string {
             );
           })
           .join("");
+
+  const saplingRows = TREE_TYPES.map((treeType) => {
+    const def = TREES[treeType];
+    return (
+      '<div class="market-row"><span>' +
+      swatch(def.saplingColor, def.saplingSymbol) +
+      ` ${treeType} sapling <span class="hint">(matures in ${def.matureStage} ticks)</span></span>` +
+      `<span class="market-price">${def.saplingCost} gold</span></div>`
+    );
+  }).join("");
 
   const sellRows = SELLABLE_ITEM_TYPES.map((itemType) => {
     const icon = sellIcon(itemType);
@@ -119,6 +134,9 @@ function renderMarketPage(): string {
   <h3>Today's seeds for sale (rotates daily)</h3>
   <div class="panel">${offerRows}</div>
 
+  <h3>Saplings for sale (always available)</h3>
+  <div class="panel">${saplingRows}</div>
+
   <h3>Sell prices</h3>
   <div class="panel">${sellRows}</div>
 
@@ -144,7 +162,7 @@ function renderMarketPage(): string {
       }
       feed.innerHTML = entries.map((t) => {
         const time = new Date(t.createdAt).toLocaleTimeString();
-        const verb = t.action === "buy_seeds" ? "bought" : "sold";
+        const verb = t.action === "buy_seeds" || t.action === "buy_sapling" ? "bought" : "sold";
         const farmLabel = escapeHtml(t.farmName || t.farmId.slice(0, 8));
         return '<div class="feed-entry">' +
           '<span class="feed-time">' + time + '</span> ' +

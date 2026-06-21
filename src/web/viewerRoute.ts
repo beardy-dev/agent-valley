@@ -1,10 +1,11 @@
 import { FastifyInstance } from "fastify";
 import { PrismaClient } from "@prisma/client";
 import { broadcast, HISTORY_LIMIT, subscribe } from "./connections";
-import { DEBRIS_COLORS, DEBRIS_SYMBOLS } from "../game/render";
+import { BLOCKED_COLOR, BLOCKED_SYMBOL, DEBRIS_COLORS, DEBRIS_SYMBOLS } from "../game/render";
 import { CROPS } from "../game/crops";
 import { GOLD_ITEM_TYPE, getTodaysSeedOffer } from "../game/market";
-import { SEED_PREFIX, seedItemType } from "../game/inventory";
+import { SAPLING_PREFIX, saplingItemType, SEED_PREFIX, seedItemType } from "../game/inventory";
+import { TREES } from "../game/trees";
 import { escapeHtml, swatch } from "./html";
 
 const LEGEND = [
@@ -12,9 +13,15 @@ const LEGEND = [
   `${swatch(DEBRIS_COLORS.WEED, DEBRIS_SYMBOLS.WEED)} weed`,
   `${swatch(DEBRIS_COLORS.ROCK, DEBRIS_SYMBOLS.ROCK)} rock`,
   `${swatch(DEBRIS_COLORS.WILTED, DEBRIS_SYMBOLS.WILTED)} wilted (unharvested too long)`,
+  `${swatch(BLOCKED_COLOR, BLOCKED_SYMBOL)} blocked by a tree's canopy`,
   ...Object.entries(CROPS).map(
     ([name, def]) =>
       `${swatch(def.growingColor, def.growingSymbol)}/${swatch(def.matureColor, def.matureSymbol)} ${name} (growing/mature)`
+  ),
+  ...Object.entries(TREES).map(
+    ([name, def]) =>
+      `${swatch(def.saplingColor, def.saplingSymbol)}/${swatch(def.matureColor, def.matureSymbol)} ${name} tree (sapling/mature), ` +
+      `${swatch(def.fruitColor, def.fruitSymbol)} fruit`
   ),
 ].join(" | ");
 
@@ -41,6 +48,18 @@ const ITEM_ICONS: Record<string, { symbol: string; color: string; section: ItemS
     Object.entries(CROPS).map(([name, def]) => [
       seedItemType(name as keyof typeof CROPS),
       { symbol: def.growingSymbol, color: def.growingColor, section: "seed" as const, matureStage: def.matureStage },
+    ])
+  ),
+  // Harvested fruit (bare TreeType key, same convention as harvested crops).
+  ...Object.fromEntries(
+    Object.entries(TREES).map(([name, def]) => [name, { symbol: def.fruitSymbol, color: def.fruitColor, section: "harvested" as const }])
+  ),
+  // Saplings join the "Seeds" section — same economic bucket (something you
+  // plant), just under a separate sapling_ prefix (see src/game/inventory.ts).
+  ...Object.fromEntries(
+    Object.entries(TREES).map(([name, def]) => [
+      saplingItemType(name as keyof typeof TREES),
+      { symbol: def.saplingSymbol, color: def.saplingColor, section: "seed" as const, matureStage: def.matureStage },
     ])
   ),
 };
@@ -209,6 +228,7 @@ function renderViewerPage(farmId: string, name: string | null): string {
     const ITEM_ICONS = ${JSON.stringify(ITEM_ICONS)};
     const GOLD_ITEM_TYPE = ${JSON.stringify(GOLD_ITEM_TYPE)};
     const SEED_PREFIX = ${JSON.stringify(SEED_PREFIX)};
+    const SAPLING_PREFIX = ${JSON.stringify(SAPLING_PREFIX)};
 
     function escapeHtml(s) {
       return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -233,7 +253,9 @@ function renderViewerPage(farmId: string, name: string | null): string {
     }
 
     function itemLabel(itemType) {
-      return itemType.startsWith(SEED_PREFIX) ? itemType.slice(SEED_PREFIX.length) + " seeds" : itemType;
+      if (itemType.startsWith(SAPLING_PREFIX)) return itemType.slice(SAPLING_PREFIX.length) + " sapling";
+      if (itemType.startsWith(SEED_PREFIX)) return itemType.slice(SEED_PREFIX.length) + " seeds";
+      return itemType;
     }
 
     function renderInventoryRow(item) {
