@@ -5,12 +5,17 @@ export const DEBRIS_SYMBOLS: Record<string, string> = {
   NONE: ".",
   WEED: "W",
   ROCK: "R",
+  // A mature crop left unharvested too long (see WILT_TICKS in
+  // src/game/crops.ts) dies and leaves this behind, same as any other
+  // debris — must be tilled before the tile can be replanted.
+  WILTED: "☠",
 };
 
 export const DEBRIS_COLORS: Record<string, string> = {
   NONE: "#4a3a28",
   WEED: "#5cb85c",
   ROCK: "#9e9e9e",
+  WILTED: "#8b3a3a",
 };
 
 function tileSymbol(tile: Pick<Tile, "debris" | "cropType" | "cropStage">): string {

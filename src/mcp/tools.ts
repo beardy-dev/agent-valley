@@ -327,7 +327,12 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
       withGameLog(prisma, agent.farmId, "harvest", async ({ x, y }) => {
         return prisma.$transaction(async (tx) => {
           const tile = await getTile(tx, x, y);
-          if (!tile.cropType) return fail("Nothing to harvest here.");
+          if (!tile.cropType) {
+            if (tile.debris === "WILTED") {
+              return fail(`The crop here wilted and died before it could be harvested — till (${x}, ${y}) to clear it.`);
+            }
+            return fail("Nothing to harvest here.");
+          }
           if (!isCropType(tile.cropType) || !isMature(tile.cropType, tile.cropStage)) {
             return fail(`${tile.cropType} is still growing (stage ${tile.cropStage}) — check back after more ticks.`);
           }

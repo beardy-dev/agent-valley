@@ -46,6 +46,12 @@ export async function grantStartingInventory(db: Db, farmId: string): Promise<vo
         { farmId, itemType: cropType, quantity: 0 },
       ]),
       ...DEBRIS_ITEM_TYPES.map((itemType) => ({ farmId, itemType, quantity: 0 })),
+      // Deliberately not in DEBRIS_ITEM_TYPES (so it stays out of
+      // SELLABLE_ITEM_TYPES) — a wilted plant is a flavor/feedback counter
+      // ("you lost this one"), not a sellable resource. "wilted" is the
+      // lowercased form of the WILTED debris value (src/game/render.ts),
+      // the same derivation `till` already does generically for any debris.
+      { farmId, itemType: "wilted", quantity: 0 },
     ],
   });
 }

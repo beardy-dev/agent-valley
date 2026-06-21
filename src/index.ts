@@ -21,8 +21,9 @@ async function main() {
     tickInProgress = true;
 
     advanceTick(prisma)
-      .then(({ grown, affectedFarmIds }) => {
+      .then(({ grown, wilted, affectedFarmIds }) => {
         if (grown > 0) app.log.info(`tick: ${grown} crop(s) advanced`);
+        if (wilted > 0) app.log.info(`tick: ${wilted} crop(s) wilted`);
         return broadcastAll(prisma, affectedFarmIds);
       })
       .catch((err) => app.log.error(err, "tick failed"))

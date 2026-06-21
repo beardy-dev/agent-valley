@@ -11,6 +11,7 @@ const LEGEND = [
   `${swatch(DEBRIS_COLORS.NONE, DEBRIS_SYMBOLS.NONE)} dirt`,
   `${swatch(DEBRIS_COLORS.WEED, DEBRIS_SYMBOLS.WEED)} weed`,
   `${swatch(DEBRIS_COLORS.ROCK, DEBRIS_SYMBOLS.ROCK)} rock`,
+  `${swatch(DEBRIS_COLORS.WILTED, DEBRIS_SYMBOLS.WILTED)} wilted (unharvested too long)`,
   ...Object.entries(CROPS).map(
     ([name, def]) =>
       `${swatch(def.growingColor, def.growingSymbol)}/${swatch(def.matureColor, def.matureSymbol)} ${name} (growing/mature)`
@@ -29,6 +30,7 @@ const ITEM_ICONS: Record<string, { symbol: string; color: string; section: ItemS
   [GOLD_ITEM_TYPE]: { symbol: "$", color: "#ffd700", section: "misc" },
   weed: { symbol: DEBRIS_SYMBOLS.WEED, color: DEBRIS_COLORS.WEED, section: "misc" },
   rock: { symbol: DEBRIS_SYMBOLS.ROCK, color: DEBRIS_COLORS.ROCK, section: "misc" },
+  wilted: { symbol: DEBRIS_SYMBOLS.WILTED, color: DEBRIS_COLORS.WILTED, section: "misc" },
   ...Object.fromEntries(
     Object.entries(CROPS).map(([name, def]) => [name, { symbol: def.matureSymbol, color: def.matureColor, section: "harvested" as const }])
   ),
@@ -143,6 +145,13 @@ function renderViewerPage(farmId: string, name: string | null): string {
   #legend-panel #legend { margin-top: 4px; }
   #board { display: flex; gap: 24px; align-items: flex-start; }
   #grid { font-size: 16px; line-height: 1.05; white-space: pre; }
+  /* Tiles are concatenated characters, not fixed cells — pin every glyph to
+     one character-width so a wider symbol (e.g. the wilted skull) can't
+     shift the rest of its row out of alignment. overflow:hidden is the
+     part that actually enforces it — a fixed width alone doesn't stop a
+     wider glyph from visually spilling into the next cell, just clipping
+     does. */
+  #grid span { display: inline-block; width: 1ch; overflow: hidden; text-align: center; }
   #sidebar { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; }
   #sidebar h3 { margin: 0 0 8px; font-size: 13px; color: #999; font-weight: normal; text-transform: uppercase; }
   #history { max-height: 480px; overflow-y: auto; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 12px; }
