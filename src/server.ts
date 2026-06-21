@@ -9,7 +9,7 @@ import { registerWorldRoutes } from "./web/worldRoute";
 import { registerHomeRoutes } from "./web/homeRoute";
 
 export async function buildServer() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, trustProxy: true });
 
   await app.register(websocketPlugin);
   // Global per-IP default; routes that need a tighter bound (e.g.
