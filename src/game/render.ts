@@ -10,7 +10,7 @@ export const DEBRIS_SYMBOLS: Record<string, string> = {
   // long dies and leaves this behind, same as any other debris — must be
   // tilled before the tile can be replanted (or, for a tree's footprint,
   // before it goes back to rendering BLOCKED_SYMBOL).
-  WILTED: "☠",
+  WILTED: "x",
 };
 
 export const DEBRIS_COLORS: Record<string, string> = {
@@ -28,9 +28,9 @@ export const BLOCKED_COLOR = "#4a4a4a";
 type TileLike = Pick<Tile, "debris" | "cropType" | "cropStage" | "treeType" | "fruitType" | "blockedByTree">;
 
 // Priority order matters: a tree's own tile always shows the tree; a
-// footprint tile shows its fruit (ripe or, once WILTED, the same dead-skull
-// every other expired plant gets) ahead of the "just blocked, nothing here"
-// fallback.
+// footprint tile shows its fruit (ripe or, once WILTED, the same dead
+// marker every other expired plant gets) ahead of the "just blocked,
+// nothing here" fallback.
 function tileSymbol(tile: TileLike): string {
   if (tile.treeType && isTreeType(tile.treeType)) return treeSymbol(tile.treeType, tile.cropStage);
   if (tile.fruitType && isTreeType(tile.fruitType) && tile.debris !== "WILTED") return TREES[tile.fruitType].fruitSymbol;

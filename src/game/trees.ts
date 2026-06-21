@@ -2,7 +2,7 @@
 // footprint (see TREE_FOOTPRINT_OFFSETS/treeFootprint) that, once mature,
 // never wilts itself — instead it periodically drops a single ripe fruit
 // onto one of its 8 surrounding tiles (src/game/tick.ts), which *does*
-// wilt (reusing the existing crop-wilting skull) if left uncollected.
+// wilt (reusing the existing crop-wilting marker) if left uncollected.
 // matureStage/fruitIntervalTicks/saplingCost scale with the species so a
 // bigger investment also produces more valuable fruit less often.
 export const TREES = {

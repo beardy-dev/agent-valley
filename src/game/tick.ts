@@ -96,7 +96,7 @@ export async function advanceTick(
   await prisma.tile.updateMany({ where: fruitAgingWhere, data: { cropStage: { increment: 1 } } });
 
   // Fruit wilting: uncollected too long — dies into the same WILTED debris
-  // skull as any other expired plant. blockedByTree/treeCenterX/Y are left
+  // marker as any other expired plant. blockedByTree/treeCenterX/Y are left
   // untouched, so the tile renders blocked ("#") again once tilled, never
   // open ground.
   const fruitWiltWhere = { fruitType: { not: null }, cropStage: { gte: FRUIT_WILT_TICKS } };

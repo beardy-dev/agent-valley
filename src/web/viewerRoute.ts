@@ -165,11 +165,10 @@ function renderViewerPage(farmId: string, name: string | null): string {
   #board { display: flex; gap: 24px; align-items: flex-start; }
   #grid { font-size: 16px; line-height: 1.05; white-space: pre; }
   /* Tiles are concatenated characters, not fixed cells — pin every glyph to
-     one character-width so a wider symbol (e.g. the wilted skull) can't
-     shift the rest of its row out of alignment. overflow:hidden is the
-     part that actually enforces it — a fixed width alone doesn't stop a
-     wider glyph from visually spilling into the next cell, just clipping
-     does. */
+     one character-width so a wider symbol can't shift the rest of its row
+     out of alignment. overflow:hidden is the part that actually enforces
+     it — a fixed width alone doesn't stop a wider glyph from visually
+     spilling into the next cell, just clipping does. */
   #grid span { display: inline-block; width: 1ch; overflow: hidden; text-align: center; }
   #sidebar { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; }
   #sidebar h3 { margin: 0 0 8px; font-size: 13px; color: #999; font-weight: normal; text-transform: uppercase; }
