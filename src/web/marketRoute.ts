@@ -71,7 +71,8 @@ function renderMarketPage(): string {
             return (
               '<div class="market-row"><span>' +
               swatch(def.growingColor, def.growingSymbol) +
-              ` ${cropType} seeds</span><span class="market-price">${def.seedCost} gold</span></div>`
+              ` ${cropType} seeds <span class="hint">(matures in ${def.matureStage} ticks)</span></span>` +
+              `<span class="market-price">${def.seedCost} gold</span></div>`
             );
           })
           .join("");
@@ -99,6 +100,7 @@ function renderMarketPage(): string {
   .panel { border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
   .market-row { display: flex; justify-content: space-between; padding: 3px 0; }
   .market-price { color: #ddd; font-weight: bold; }
+  .hint { color: #777; font-size: 0.85em; }
   .empty { color: #666; }
   #feed { max-height: 420px; overflow-y: auto; }
   .feed-entry { padding: 5px 0; border-bottom: 1px solid #222; }

@@ -25,17 +25,20 @@ const LEGEND = [
 // distinct. Gold isn't a tile/crop and gets its own line in the panel
 // (outside the three sections), but still gets a hand-picked icon entry.
 type ItemSection = "seed" | "harvested" | "misc";
-const ITEM_ICONS: Record<string, { symbol: string; color: string; section: ItemSection }> = {
+const ITEM_ICONS: Record<string, { symbol: string; color: string; section: ItemSection; matureStage?: number }> = {
   [GOLD_ITEM_TYPE]: { symbol: "$", color: "#ffd700", section: "misc" },
   weed: { symbol: DEBRIS_SYMBOLS.WEED, color: DEBRIS_COLORS.WEED, section: "misc" },
   rock: { symbol: DEBRIS_SYMBOLS.ROCK, color: DEBRIS_COLORS.ROCK, section: "misc" },
   ...Object.fromEntries(
     Object.entries(CROPS).map(([name, def]) => [name, { symbol: def.matureSymbol, color: def.matureColor, section: "harvested" as const }])
   ),
+  // Seed rows additionally carry matureStage (ticks to grow, see
+  // src/game/crops.ts) so the inventory panel can show how long a seed
+  // takes to mature once planted.
   ...Object.fromEntries(
     Object.entries(CROPS).map(([name, def]) => [
       seedItemType(name as keyof typeof CROPS),
-      { symbol: def.growingSymbol, color: def.growingColor, section: "seed" as const },
+      { symbol: def.growingSymbol, color: def.growingColor, section: "seed" as const, matureStage: def.matureStage },
     ])
   ),
 };
@@ -117,7 +120,8 @@ function renderMarketOfferRows(): string {
       return (
         '<div class="inventory-entry"><span>' +
         swatch(def.growingColor, def.growingSymbol) +
-        ` ${cropType} seeds</span><span class="inventory-qty">${def.seedCost} gold</span></div>`
+        ` ${cropType} seeds <span class="hint">(matures in ${def.matureStage} ticks)</span></span>` +
+        `<span class="inventory-qty">${def.seedCost} gold</span></div>`
       );
     })
     .join("");
@@ -156,6 +160,7 @@ function renderViewerPage(farmId: string, name: string | null): string {
   .inventory-section h4 { margin: 0 0 4px; font-size: 11px; color: #888; font-weight: normal; text-transform: uppercase; }
   .inventory-entry { display: flex; justify-content: space-between; padding: 3px 0; }
   .inventory-qty { color: #ddd; font-weight: bold; }
+  .hint { color: #777; font-size: 0.85em; }
   #market { border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
   #market-panel h3 a { color: #8af; font-weight: normal; }
 </style>
@@ -224,8 +229,9 @@ function renderViewerPage(farmId: string, name: string | null): string {
 
     function renderInventoryRow(item) {
       const icon = ITEM_ICONS[item.itemType] || { symbol: "?", color: "#888" };
+      const hint = icon.matureStage !== undefined ? ' <span class="hint">(matures in ' + icon.matureStage + ' ticks)</span>' : '';
       return '<div class="inventory-entry">' +
-        '<span><span style="color:' + icon.color + ';">' + icon.symbol + '</span> ' + escapeHtml(itemLabel(item.itemType)) + '</span>' +
+        '<span><span style="color:' + icon.color + ';">' + icon.symbol + '</span> ' + escapeHtml(itemLabel(item.itemType)) + hint + '</span>' +
         '<span class="inventory-qty">' + item.quantity + '</span>' +
         '</div>';
     }
