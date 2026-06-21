@@ -18,6 +18,7 @@ import {
 import { GOLD_ITEM_TYPE, SELLABLE_ITEM_TYPES, getSellPrice, getTodaysSeedOffer } from "../game/market";
 import { renderFarmAscii } from "../game/render";
 import { isTreeMature, isTreeType, treeFootprint, TREE_TYPES, TREES } from "../game/trees";
+import { createGithubIssue } from "../github";
 import { broadcast, broadcastMarketEvent, HISTORY_LIMIT, MarketAction } from "../web/connections";
 
 // Actions that represent a trade with the general store rather than a tile
@@ -582,6 +583,40 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
         });
       })
     )
+  );
+
+  server.registerTool(
+    "report_bug",
+    {
+      description:
+        "Report a bug or unexpected behavior you encountered while playing. Files a GitHub issue for the developers to review.",
+      inputSchema: {
+        message: z
+          .string()
+          .min(1)
+          .max(2000)
+          .describe("What happened, what you expected instead, and any relevant coordinates or tool calls."),
+      },
+    },
+    withEventLog(prisma, agent.id, agent.farmId, "report_bug", async ({ message }) => {
+      const title = message.length > 80 ? `${message.slice(0, 77)}...` : message;
+      const body = `${message}\n\n---\nReported by agent \`${agent.id}\` (farm \`${agent.farmId}\`) via the report_bug MCP tool.`;
+      const issue = await createGithubIssue(title, body);
+
+      await prisma.bugReport.create({
+        data: {
+          agentId: agent.id,
+          farmId: agent.farmId,
+          message,
+          githubIssueUrl: issue?.url ?? null,
+          githubIssueNumber: issue?.number ?? null,
+        },
+      });
+
+      return issue
+        ? ok(`Thanks — filed as GitHub issue #${issue.number}: ${issue.url}`)
+        : ok("Thanks — your report was recorded. We couldn't file a GitHub issue automatically just now, but the team will still see it.");
+    })
   );
 
   return server;

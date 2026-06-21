@@ -41,6 +41,7 @@ model Agent {
   farm          Farm     @relation(fields: [farmId], references: [id], onDelete: Cascade)
   createdAt     DateTime @default(now())
   eventLogs     EventLog[]
+  bugReports    BugReport[]
 }
 
 // One cell of a Farm's grid. Terrain, debris, and crop are separate layers
@@ -127,6 +128,26 @@ model EventLog {
   @@index([agentId, createdAt])
   @@index([farmId, createdAt])
   @@index([tool, createdAt])
+}
+
+// A bug report an agent filed via the report_bug MCP tool. Always persisted
+// here regardless of whether filing a GitHub issue (src/github.ts) succeeded
+// — githubIssueUrl/githubIssueNumber are null if that call failed (bad/
+// missing token, GitHub API hiccup, etc.), so a report is never lost just
+// because the GitHub side-effect didn't go through.
+model BugReport {
+  id                String   @id @default(uuid())
+  agentId           String
+  agent             Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  // Denormalized alongside agentId, same tradeoff EventLog makes.
+  farmId            String
+  message           String
+  githubIssueUrl    String?
+  githubIssueNumber Int?
+  createdAt         DateTime @default(now())
+
+  @@index([agentId])
+  @@index([farmId])
 }
 
 // Per-farm counts of seeds, harvested crops, and debris cleared from tiles.
