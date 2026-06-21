@@ -3,10 +3,15 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { Agent, Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { CROP_TYPES, CROPS, isCropType, isMature } from "../game/crops";
-import { addItem, consumeItem, getInventory, getItemQuantity } from "../game/inventory";
+import { addItem, consumeItem, getInventory, getItemQuantity, isSeedItemType, SEED_PREFIX, seedItemType } from "../game/inventory";
 import { GOLD_ITEM_TYPE, SELLABLE_ITEM_TYPES, getSellPrice, getTodaysSeedOffer } from "../game/market";
 import { renderFarmAscii } from "../game/render";
-import { broadcast, HISTORY_LIMIT } from "../web/connections";
+import { broadcast, broadcastMarketEvent, HISTORY_LIMIT, MarketAction } from "../web/connections";
+
+// Actions that represent a trade with the general store rather than a tile
+// edit — withGameLog uses this to also push successful ones to the global
+// /market live feed.
+const MARKET_ACTIONS: ReadonlySet<string> = new Set<MarketAction>(["sell", "buy_seeds"]);
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -82,6 +87,9 @@ function withGameLog<Arg>(
     const coords = arg as { x?: number; y?: number };
     await recordAction(prisma, farmId, action, coords.x ?? null, coords.y ?? null, resultText(result), !result.isError);
     await broadcast(prisma, farmId);
+    if (!result.isError && MARKET_ACTIONS.has(action)) {
+      await broadcastMarketEvent(prisma, farmId, action as MarketAction, resultText(result));
+    }
     return result;
   };
 }
@@ -201,7 +209,24 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
     withEventLog(prisma, agent.id, agent.farmId, "inspect_inventory", async () => {
       const items = await getInventory(prisma, agent.farmId);
       if (items.length === 0) return ok("Your inventory is empty.");
-      return ok(items.map((item) => `${item.itemType}: ${item.quantity}`).join("\n"));
+
+      const gold = items.find((item) => item.itemType === GOLD_ITEM_TYPE);
+      const seeds = items.filter((item) => isSeedItemType(item.itemType));
+      const harvested = items.filter((item) => isCropType(item.itemType));
+      const misc = items.filter((item) => item !== gold && !isSeedItemType(item.itemType) && !isCropType(item.itemType));
+
+      const seedLabel = (itemType: string) => `${itemType.slice(SEED_PREFIX.length)} seeds`;
+      const section = (label: string, rows: typeof items, itemLabel: (itemType: string) => string = (t) => t) =>
+        `${label}:\n` + (rows.length === 0 ? "  none" : rows.map((row) => `  ${itemLabel(row.itemType)}: ${row.quantity}`).join("\n"));
+
+      return ok(
+        [
+          `Gold: ${gold?.quantity ?? 0}`,
+          section("Seeds", seeds, seedLabel),
+          section("Harvested", harvested),
+          section("Misc", misc),
+        ].join("\n\n")
+      );
     })
   );
 
@@ -273,7 +298,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
           if (tile.debris !== "NONE") return fail(`This tile still has ${tile.debris.toLowerCase()} on it — till it first.`);
           if (tile.cropType) return fail(`A ${tile.cropType} is already planted here.`);
 
-          const remaining = await consumeItem(tx, agent.farmId, cropType, 1);
+          const remaining = await consumeItem(tx, agent.farmId, seedItemType(cropType), 1);
           if (remaining === null) return fail(`You don't have any ${cropType} seeds left.`);
 
           await tx.tile.update({
@@ -376,7 +401,7 @@ export async function buildGameMcpServer(prisma: PrismaClient, agent: Agent): Pr
             return fail(`You need ${cost} gold to buy ${quantity} ${cropType} seed(s) but don't have enough.`);
           }
 
-          const seeds = await addItem(tx, agent.farmId, cropType, quantity);
+          const seeds = await addItem(tx, agent.farmId, seedItemType(cropType), quantity);
           return ok(`Bought ${quantity} ${cropType} seed(s) for ${cost} gold. ${remainingGold} gold left, ${seeds} ${cropType} seed(s) total.`);
         });
       })

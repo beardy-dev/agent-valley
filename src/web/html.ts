@@ -5,3 +5,9 @@
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 }
+
+// Wraps a single ASCII symbol in a colored <span>, used wherever a crop or
+// debris icon is rendered server-side (legend, market price tables, etc).
+export function swatch(color: string, symbol: string): string {
+  return `<span style="color:${color};">${symbol}</span>`;
+}

@@ -7,6 +7,7 @@ import { registerMcpRoute } from "./mcp/route";
 import { registerViewerRoutes } from "./web/viewerRoute";
 import { registerWorldRoutes } from "./web/worldRoute";
 import { registerHomeRoutes } from "./web/homeRoute";
+import { registerMarketRoutes } from "./web/marketRoute";
 
 export async function buildServer() {
   const app = Fastify({ logger: true, trustProxy: true });
@@ -24,6 +25,7 @@ export async function buildServer() {
   registerMcpRoute(app, prisma);
   registerViewerRoutes(app, prisma);
   registerWorldRoutes(app, prisma);
+  registerMarketRoutes(app, prisma);
 
   app.addHook("onClose", async () => {
     await prisma.$disconnect();

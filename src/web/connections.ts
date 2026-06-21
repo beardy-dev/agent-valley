@@ -41,6 +41,57 @@ export function subscribe(farmId: string, socket: WebSocket): boolean {
 // src/mcp/tools.ts's recordAction, and shown in the viewer page's heading.
 export const HISTORY_LIMIT = 50;
 
+// farmId-less set of live viewers on the global /market page — unlike the
+// per-farm `viewers` map, market activity isn't scoped to one farm, so
+// there's just one shared set of sockets.
+const marketViewers = new Set<WebSocket>();
+
+// Public/unauthenticated endpoint, same reasoning as MAX_VIEWERS_PER_FARM —
+// cap it so an attacker can't pile up unbounded sockets.
+const MAX_MARKET_VIEWERS = 200;
+
+// How many recent sell/buy_seeds transactions a freshly-connected market
+// viewer is sent as backlog (see src/web/marketRoute.ts), so the feed isn't
+// blank until the next trade happens.
+export const MARKET_FEED_LIMIT = 30;
+
+export function subscribeMarket(socket: WebSocket): boolean {
+  if (marketViewers.size >= MAX_MARKET_VIEWERS) return false;
+  marketViewers.add(socket);
+  socket.on("close", () => {
+    marketViewers.delete(socket);
+  });
+  return true;
+}
+
+export type MarketAction = "sell" | "buy_seeds";
+
+// Pushes one completed trade to every live /market viewer. No-op if nobody
+// is watching, same as broadcast() below — avoids the farm-name lookup
+// entirely when there's nothing to send it to.
+export async function broadcastMarketEvent(
+  prisma: PrismaClient,
+  farmId: string,
+  action: MarketAction,
+  message: string
+): Promise<void> {
+  if (marketViewers.size === 0) return;
+
+  const farm = await prisma.farm.findUnique({ where: { id: farmId }, select: { name: true } });
+  const payload = JSON.stringify({
+    type: "transaction",
+    farmId,
+    farmName: farm?.name ?? null,
+    action,
+    message,
+    createdAt: new Date().toISOString(),
+  });
+
+  for (const socket of marketViewers) {
+    if (socket.readyState === socket.OPEN) socket.send(payload);
+  }
+}
+
 async function renderAndSend(prisma: PrismaClient, farmId: string, sockets: Set<WebSocket>): Promise<void> {
   const farm = await prisma.farm.findUnique({ where: { id: farmId } });
   if (!farm) return;

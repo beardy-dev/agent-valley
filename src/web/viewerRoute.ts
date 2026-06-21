@@ -3,15 +3,12 @@ import { PrismaClient } from "@prisma/client";
 import { broadcast, HISTORY_LIMIT, subscribe } from "./connections";
 import { DEBRIS_COLORS, DEBRIS_SYMBOLS } from "../game/render";
 import { CROPS } from "../game/crops";
-import { GOLD_ITEM_TYPE } from "../game/market";
-import { escapeHtml } from "./html";
-
-function swatch(color: string, symbol: string): string {
-  return `<span style="color:${color};">${symbol}</span>`;
-}
+import { GOLD_ITEM_TYPE, getTodaysSeedOffer } from "../game/market";
+import { SEED_PREFIX, seedItemType } from "../game/inventory";
+import { escapeHtml, swatch } from "./html";
 
 const LEGEND = [
-  `Legend: ${swatch(DEBRIS_COLORS.NONE, DEBRIS_SYMBOLS.NONE)} dirt`,
+  `${swatch(DEBRIS_COLORS.NONE, DEBRIS_SYMBOLS.NONE)} dirt`,
   `${swatch(DEBRIS_COLORS.WEED, DEBRIS_SYMBOLS.WEED)} weed`,
   `${swatch(DEBRIS_COLORS.ROCK, DEBRIS_SYMBOLS.ROCK)} rock`,
   ...Object.entries(CROPS).map(
@@ -20,16 +17,26 @@ const LEGEND = [
   ),
 ].join(" | ");
 
-// Icon shown per inventory item type — debris uses its tile symbol/color,
-// crops use the mature symbol/color since inventory holds seeds *and*
-// harvested produce under the same key (see src/game/inventory.ts). Gold
-// isn't a tile/crop, so it gets a hand-picked icon instead of a derived one.
-const ITEM_ICONS: Record<string, { symbol: string; color: string }> = {
-  [GOLD_ITEM_TYPE]: { symbol: "$", color: "#ffd700" },
-  weed: { symbol: DEBRIS_SYMBOLS.WEED, color: DEBRIS_COLORS.WEED },
-  rock: { symbol: DEBRIS_SYMBOLS.ROCK, color: DEBRIS_COLORS.ROCK },
+// Icon + section shown per inventory item type, driving how the viewer's
+// inventory panel groups and renders each row. Debris uses its tile
+// symbol/color; harvested produce uses the mature symbol/color; seeds (a
+// separate "seed_<crop>" key — see src/game/inventory.ts) use the *growing*
+// symbol/color, so the same crop's seed and harvested icons are visually
+// distinct. Gold isn't a tile/crop and gets its own line in the panel
+// (outside the three sections), but still gets a hand-picked icon entry.
+type ItemSection = "seed" | "harvested" | "misc";
+const ITEM_ICONS: Record<string, { symbol: string; color: string; section: ItemSection }> = {
+  [GOLD_ITEM_TYPE]: { symbol: "$", color: "#ffd700", section: "misc" },
+  weed: { symbol: DEBRIS_SYMBOLS.WEED, color: DEBRIS_COLORS.WEED, section: "misc" },
+  rock: { symbol: DEBRIS_SYMBOLS.ROCK, color: DEBRIS_COLORS.ROCK, section: "misc" },
   ...Object.fromEntries(
-    Object.entries(CROPS).map(([name, def]) => [name, { symbol: def.matureSymbol, color: def.matureColor }])
+    Object.entries(CROPS).map(([name, def]) => [name, { symbol: def.matureSymbol, color: def.matureColor, section: "harvested" as const }])
+  ),
+  ...Object.fromEntries(
+    Object.entries(CROPS).map(([name, def]) => [
+      seedItemType(name as keyof typeof CROPS),
+      { symbol: def.growingSymbol, color: def.growingColor, section: "seed" as const },
+    ])
   ),
 };
 
@@ -98,6 +105,24 @@ function renderNoFarmsPage(): string {
 </html>`;
 }
 
+// Today's seed rotation, rendered as inventory-style rows. Computed fresh
+// per page request (not hoisted to module scope like LEGEND) since, unlike
+// the legend, this actually changes once a day — see getTodaysSeedOffer.
+function renderMarketOfferRows(): string {
+  const offer = getTodaysSeedOffer();
+  if (offer.length === 0) return '<div class="history-empty">Nothing in rotation today.</div>';
+  return offer
+    .map((cropType) => {
+      const def = CROPS[cropType];
+      return (
+        '<div class="inventory-entry"><span>' +
+        swatch(def.growingColor, def.growingSymbol) +
+        ` ${cropType} seeds</span><span class="inventory-qty">${def.seedCost} gold</span></div>`
+      );
+    })
+    .join("");
+}
+
 function renderViewerPage(farmId: string, name: string | null): string {
   const title = name ? `${escapeHtml(name)} (${farmId})` : farmId;
   return `<!doctype html>
@@ -109,6 +134,9 @@ function renderViewerPage(farmId: string, name: string | null): string {
   body { background: #111; color: #eee; font-family: monospace; padding: 16px; }
   h2 { margin: 0 0 4px; }
   #legend, #meta { color: #888; margin-bottom: 8px; }
+  #legend-panel summary { cursor: pointer; color: #888; margin-bottom: 4px; }
+  #legend-panel summary:hover { color: #ccc; }
+  #legend-panel #legend { margin-top: 4px; }
   #board { display: flex; gap: 24px; align-items: flex-start; }
   #grid { font-size: 16px; line-height: 1.05; white-space: pre; }
   #sidebar { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; gap: 20px; }
@@ -122,14 +150,23 @@ function renderViewerPage(farmId: string, name: string | null): string {
   .history-message { color: #ccc; display: block; }
   .history-empty { color: #666; }
   #inventory { border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+  .inventory-gold { display: flex; justify-content: space-between; padding: 3px 0; font-weight: bold; color: #ffd700; border-bottom: 1px solid #333; margin-bottom: 6px; }
+  .inventory-section { margin-bottom: 10px; }
+  .inventory-section:last-child { margin-bottom: 0; }
+  .inventory-section h4 { margin: 0 0 4px; font-size: 11px; color: #888; font-weight: normal; text-transform: uppercase; }
   .inventory-entry { display: flex; justify-content: space-between; padding: 3px 0; }
   .inventory-qty { color: #ddd; font-weight: bold; }
+  #market { border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+  #market-panel h3 a { color: #8af; font-weight: normal; }
 </style>
 </head>
 <body>
   <h2>${title}</h2>
-  <div><a href="/world" style="color:#8af;">&larr; World Map</a></div>
-  <div id="legend">${LEGEND}</div>
+  <div><a href="/world" style="color:#8af;">&larr; World Map</a> &middot; <a href="/market" style="color:#8af;">&#127978; Market</a></div>
+  <details id="legend-panel" open>
+    <summary>Legend</summary>
+    <div id="legend">${LEGEND}</div>
+  </details>
   <div id="meta">connecting...</div>
   <div id="board">
     <pre id="grid">loading...</pre>
@@ -142,6 +179,10 @@ function renderViewerPage(farmId: string, name: string | null): string {
         <h3>Inventory</h3>
         <div id="inventory"><div class="history-empty">Empty.</div></div>
       </div>
+      <div id="market-panel">
+        <h3>Today's seeds (<a href="/market" style="text-transform:none;">live feed &rarr;</a>)</h3>
+        <div id="market">${renderMarketOfferRows()}</div>
+      </div>
     </div>
   </div>
   <script>
@@ -152,6 +193,8 @@ function renderViewerPage(farmId: string, name: string | null): string {
     const history = document.getElementById("history");
     const inventory = document.getElementById("inventory");
     const ITEM_ICONS = ${JSON.stringify(ITEM_ICONS)};
+    const GOLD_ITEM_TYPE = ${JSON.stringify(GOLD_ITEM_TYPE)};
+    const SEED_PREFIX = ${JSON.stringify(SEED_PREFIX)};
 
     function escapeHtml(s) {
       return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -175,18 +218,41 @@ function renderViewerPage(farmId: string, name: string | null): string {
       }).join("");
     }
 
+    function itemLabel(itemType) {
+      return itemType.startsWith(SEED_PREFIX) ? itemType.slice(SEED_PREFIX.length) + " seeds" : itemType;
+    }
+
+    function renderInventoryRow(item) {
+      const icon = ITEM_ICONS[item.itemType] || { symbol: "?", color: "#888" };
+      return '<div class="inventory-entry">' +
+        '<span><span style="color:' + icon.color + ';">' + icon.symbol + '</span> ' + escapeHtml(itemLabel(item.itemType)) + '</span>' +
+        '<span class="inventory-qty">' + item.quantity + '</span>' +
+        '</div>';
+    }
+
+    function renderSection(label, rows) {
+      return '<div class="inventory-section"><h4>' + label + '</h4>' +
+        (rows.length > 0 ? rows.map(renderInventoryRow).join("") : '<div class="history-empty">None</div>') +
+        '</div>';
+    }
+
     function renderInventory(items) {
       if (!items || items.length === 0) {
         inventory.innerHTML = '<div class="history-empty">Empty.</div>';
         return;
       }
-      inventory.innerHTML = items.map((item) => {
-        const icon = ITEM_ICONS[item.itemType] || { symbol: "?", color: "#888" };
-        return '<div class="inventory-entry">' +
-          '<span><span style="color:' + icon.color + ';">' + icon.symbol + '</span> ' + escapeHtml(item.itemType) + '</span>' +
-          '<span class="inventory-qty">' + item.quantity + '</span>' +
-          '</div>';
-      }).join("");
+      const gold = items.find((item) => item.itemType === GOLD_ITEM_TYPE);
+      const sections = { seed: [], harvested: [], misc: [] };
+      for (const item of items) {
+        if (item.itemType === GOLD_ITEM_TYPE) continue;
+        const section = (ITEM_ICONS[item.itemType] || {}).section || "misc";
+        sections[section].push(item);
+      }
+      inventory.innerHTML =
+        '<div class="inventory-gold"><span>$ Gold</span><span>' + (gold ? gold.quantity : 0) + '</span></div>' +
+        renderSection("Seeds", sections.seed) +
+        renderSection("Harvested", sections.harvested) +
+        renderSection("Misc", sections.misc);
     }
 
     ws.onopen = () => { meta.textContent = "connected — live"; };

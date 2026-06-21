@@ -1,12 +1,14 @@
 import { buildServer } from "./server";
 import { prisma } from "./db";
 import { advanceTick } from "./game/tick";
+import { migrateLegacySeedInventory } from "./game/legacyInventoryMigration";
 import { broadcastAll } from "./web/connections";
 
 const port = Number(process.env.PORT ?? 3000);
 const tickIntervalMs = Number(process.env.TICK_INTERVAL_MS ?? 20_000);
 
 async function main() {
+  await migrateLegacySeedInventory(prisma);
   const app = await buildServer();
 
   // Guards against overlapping ticks: if advanceTick + broadcastAll ever

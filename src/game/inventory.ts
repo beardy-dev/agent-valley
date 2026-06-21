@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
-import { CROP_TYPES, STARTER_CROPS } from "./crops";
+import { CROP_TYPES, CropType, STARTER_CROPS } from "./crops";
 import { DEBRIS_ITEM_TYPES, GOLD_ITEM_TYPE } from "./market";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -14,18 +14,37 @@ export const STARTING_SEED_COUNT = 5;
 // on starter seeds, before the agent has sold anything of its own.
 export const STARTING_GOLD = 20;
 
+// Seeds and harvested produce of the same crop are tracked as separate
+// InventoryItem rows so they can be shown/sold/planted independently — the
+// bare CropType key (e.g. "carrot") means harvested produce, and this prefix
+// distinguishes the seed counterpart ("seed_carrot"). See
+// src/game/legacyInventoryMigration.ts for farms that predate this split.
+export const SEED_PREFIX = "seed_";
+
+export function seedItemType(cropType: CropType): string {
+  return `${SEED_PREFIX}${cropType}`;
+}
+
+export function isSeedItemType(itemType: string): boolean {
+  return itemType.startsWith(SEED_PREFIX);
+}
+
 export async function grantStartingInventory(db: Db, farmId: string): Promise<void> {
   await db.inventoryItem.createMany({
     data: [
       { farmId, itemType: GOLD_ITEM_TYPE, quantity: STARTING_GOLD },
-      ...CROP_TYPES.map((itemType) => ({
-        farmId,
-        itemType,
-        // Pre-seeded at 0 for non-starter crops (rather than omitted) so a
-        // fresh farm's inventory always lists every tracked item type up
-        // front, same reasoning as the debris items below.
-        quantity: STARTER_CROPS.includes(itemType) ? STARTING_SEED_COUNT : 0,
-      })),
+      ...CROP_TYPES.flatMap((cropType) => [
+        {
+          farmId,
+          itemType: seedItemType(cropType),
+          // Pre-seeded at 0 for non-starter crops (rather than omitted) so a
+          // fresh farm's inventory always lists every tracked item type up
+          // front, same reasoning as the debris items below.
+          quantity: STARTER_CROPS.includes(cropType) ? STARTING_SEED_COUNT : 0,
+        },
+        // Harvested produce always starts at 0 — nothing's been grown yet.
+        { farmId, itemType: cropType, quantity: 0 },
+      ]),
       ...DEBRIS_ITEM_TYPES.map((itemType) => ({ farmId, itemType, quantity: 0 })),
     ],
   });

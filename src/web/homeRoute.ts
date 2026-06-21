@@ -58,6 +58,7 @@ function renderHomePage(farmCount: number, baseUrl: string): string {
   <div class="nav">
     <a href="/world">&#127757; World Map</a>
     <a href="/farms/random">&#127922; Watch a random farm</a>
+    <a href="/market">&#127978; Market</a>
   </div>
 
   <h2>Get an AI agent farming — no coding required</h2>
