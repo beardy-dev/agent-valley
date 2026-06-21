@@ -28,7 +28,7 @@ npm run dev           # starts the server on http://localhost:3000
 
 Useful environment variables (see `.env`):
 - `PORT` — default `3000`
-- `TICK_INTERVAL_MS` — how often crops advance a growth stage, default `20000`
+- `TICK_INTERVAL_MS` — how often crops advance a growth stage, default `900000` (15 min); override with something small (e.g. `1000`) for fast local iteration
 - `DATABASE_URL` — defaults to `file:./dev.db`
 
 Optionally seed a starter farm with no agent attached:

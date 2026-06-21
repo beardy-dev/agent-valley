@@ -5,7 +5,7 @@ import { migrateLegacySeedInventory } from "./game/legacyInventoryMigration";
 import { broadcastAll } from "./web/connections";
 
 const port = Number(process.env.PORT ?? 3000);
-const tickIntervalMs = Number(process.env.TICK_INTERVAL_MS ?? 20_000);
+const tickIntervalMs = Number(process.env.TICK_INTERVAL_MS ?? 900_000);
 
 async function main() {
   await migrateLegacySeedInventory(prisma);
